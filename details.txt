@@ -1,0 +1,32 @@
+[
+  {
+    "AllowedOrigins": [
+      "*"
+    ],
+    "AllowedMethods": [
+      "GET",
+      "PUT",
+      "HEAD",
+      "POST",
+      "DELETE"
+    ],
+    "AllowedHeaders": [
+      "Content-Type",
+      "Content-Length",
+      "Authorization",
+      "Range",
+      "Accept"
+    ],
+    "ExposeHeaders": [
+      "Content-Length",
+      "Content-Range",
+      "Content-Type"
+    ],
+    "MaxAgeSeconds": 3600
+  }
+]   
+
+
+
+
+"4b4cd3bb-7747-4a74-8261-6ad1e39287f9"

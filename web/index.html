@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A video sharing application">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Video Sharing App</title>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-firestore-compat.js"></script>
+  
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDC2U3n6TFc0QIlAp6e64PJjVnPYhdb8qI",
+      authDomain: "latestuploadvideo.firebaseapp.com",
+      projectId: "latestuploadvideo",
+      storageBucket: "latestuploadvideo.appspot.com",
+      messagingSenderId: "373248236240",
+      appId: "1:373248236240:web:e47887865d55d0a0bfdcd5",
+      measurementId: "G-KXQVNS2Q9P"
+    };
+    firebase.initializeApp(firebaseConfig);
+  </script>
+
+  <script>
+    var serviceWorkerVersion = null;
+  </script>
+  <script src="flutter.js"></script>
+
+  <style>
+    .loading {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      width: 100vw;
+      position: fixed;
+      background: white;
+      z-index: 999;
+    }
+    .loader {
+      width: 48px;
+      height: 48px;
+      border: 5px solid #FFF;
+      border-bottom-color: #FF3D00;
+      border-radius: 50%;
+      display: inline-block;
+      box-sizing: border-box;
+      animation: rotation 1s linear infinite;
+    }
+    @keyframes rotation {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+  <div id="loading" class="loading">
+    <div class="loader"></div>
+  </div>
+
+  <script>
+    window.addEventListener('load', function() {
+      _flutter.loader.loadEntrypoint({
+        serviceWorker: {
+          serviceWorkerVersion: serviceWorkerVersion,
+        },
+        onEntrypointLoaded: async function(engineInitializer) {
+          let appRunner = await engineInitializer.initializeEngine();
+          await appRunner.runApp();
+          document.querySelector('#loading').remove();
+        }
+      });
+    });
+  </script>
+</body>
+</html>
