@@ -1,3 +1,4 @@
+// lib/screens/landing_page.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -5,14 +6,14 @@ import 'package:provider/provider.dart';
 import '../models/video.dart';
 import '../navigation/app_navigation.dart';
 import '../screens/app_footer.dart';
+import '../screens/public_player_screen.dart';
 import '../services/auth_service.dart';
+import '../services/storage_service.dart';
 import '../services/video_url_service.dart';
 import 'login_screen.dart';
-import 'public_player_screen.dart';
 
 class LandingPage extends StatefulWidget {
   final String? videoCode;
-
   const LandingPage({Key? key, this.videoCode}) : super(key: key);
 
   @override
@@ -23,6 +24,7 @@ class _LandingPageState extends State<LandingPage> {
   Video? _video;
   bool _isLoadingVideo = false;
   String? _error;
+  final StorageService _storage = StorageService();
 
   @override
   void initState() {
@@ -39,9 +41,7 @@ class _LandingPageState extends State<LandingPage> {
     });
 
     try {
-      final videoUrlService = VideoUrlService();
-      final videoId = await videoUrlService.getVideoId(code);
-
+      final videoId = await VideoUrlService().getVideoId(code);
       if (videoId == null) {
         setState(() {
           _error = 'Video not found';
@@ -63,6 +63,9 @@ class _LandingPageState extends State<LandingPage> {
         return;
       }
 
+      // Increment view count
+      await _storage.incrementViews(videoId);
+
       setState(() {
         _video = Video.fromFirestore(doc);
         _isLoadingVideo = false;
@@ -81,11 +84,61 @@ class _LandingPageState extends State<LandingPage> {
     final screenSize = MediaQuery.of(context).size;
     final isSmallScreen = screenSize.width < 600;
 
+    // If there's a video code, show only the video player
+    if (widget.videoCode != null) {
+      if (_isLoadingVideo) {
+        return const Scaffold(
+          backgroundColor: Color(0xFF1E1B2C),
+          body: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF8257E5)),
+            ),
+          ),
+        );
+      }
+
+      if (_error != null) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF1E1B2C),
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.red, size: 64),
+                const SizedBox(height: 16),
+                Text(
+                  _error!,
+                  style: const TextStyle(color: Colors.white, fontSize: 18),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () => _loadVideo(widget.videoCode!),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF8257E5),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24, 
+                      vertical: 12,
+                    ),
+                  ),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        );
+      }
+
+      if (_video != null) {
+        return PublicVideoPage(videoCode: widget.videoCode!);
+      }
+    }
+
+    // Landing page content if no video code
     return Scaffold(
       backgroundColor: const Color(0xFF1E1B2C),
       body: Column(
         children: [
-          // Navigation Bar
           AppNavigation(
             currentUser: authService.currentUser?.email,
             onLoginPressed: () {
@@ -101,95 +154,48 @@ class _LandingPageState extends State<LandingPage> {
               Navigator.pushNamed(context, '/dashboard');
             },
           ),
-
-          // Main Content
           Expanded(
             child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  // Video Player Section (if video code exists)
-                  if (widget.videoCode != null)
+              child: Container(
+                padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
+                child: Column(
+                  children: [
                     Container(
-                      height: screenSize.height * (isSmallScreen ? 0.4 : 0.7),
-                      width: double.infinity,
-                      color: const Color(0xFF2D2940),
-                      child: _isLoadingVideo
-                          ? const Center(
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : _error != null
-                              ? Center(
-                                  child: Text(
-                                    _error!,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                    ),
-                                  ),
-                                )
-                              : _video != null
-                                  ? PublicPlayerScreen(video: _video!)
-                                  : const Center(
-                                      child: Text(
-                                        'Video not found',
-                                        style: TextStyle(
-                                          color: Colors.white,
-                                          fontSize: 16,
-                                        ),
-                                      ),
-                                    ),
-                    ),
-
-                  // Landing Page Content (only show if no video)
-                  if (widget.videoCode == null)
-                    Container(
-                      padding: EdgeInsets.all(isSmallScreen ? 16.0 : 24.0),
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2D2940),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                       child: Column(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(24),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF2D2940),
-                              borderRadius: BorderRadius.circular(12),
+                        children: const [
+                          Text(
+                            'Share Your Videos with the World',
+                            style: TextStyle(
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
-                            child: Column(
-                              children: [
-                                const Text(
-                                  'Share Your Videos with the World',
-                                  style: TextStyle(
-                                    fontSize: 32,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'Upload, share, and manage your videos easily.',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    color: Colors.white70,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ],
-                            ),
+                            textAlign: TextAlign.center,
                           ),
-                          const SizedBox(height: 48),
-
-                          // Features Section
-                          _buildFeaturesGrid(isSmallScreen),
+                          SizedBox(height: 16),
+                          Text(
+                            'Upload, share, and manage your videos easily.',
+                            style: TextStyle(
+                              fontSize: 18,
+                              color: Colors.white70,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
                         ],
                       ),
                     ),
-                ],
+                    const SizedBox(height: 48),
+                    _buildFeaturesGrid(isSmallScreen),
+                  ],
+                ),
               ),
             ),
           ),
-
-          // Footer
           const AppFooter(),
         ],
       ),

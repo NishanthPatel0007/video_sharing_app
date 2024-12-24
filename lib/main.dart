@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/landing_page.dart';
 import 'screens/login_screen.dart';
+import 'screens/public_player_screen.dart';
 import 'services/auth_service.dart';
 
 void main() async {
@@ -54,8 +55,7 @@ class MyApp extends StatelessWidget {
           if (path.startsWith('/v/')) {
             final code = path.substring(3);
             return MaterialPageRoute(
-              builder: (context) => LandingPage(videoCode: code),
-              settings: settings,
+              builder: (context) => PublicVideoPage(videoCode: code),
             );
           }
           return null;
