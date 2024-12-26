@@ -36,7 +36,7 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Video Sharing',
+        title: 'For10Cloud',
         theme: ThemeData(
           primarySwatch: Colors.blue,
           brightness: Brightness.light,
