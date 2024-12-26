@@ -1,4 +1,3 @@
-// lib/screens/landing_page.dart
 import 'dart:html' as html;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,6 +25,7 @@ class _LandingPageState extends State<LandingPage> {
   bool _isLoadingVideo = false;
   String? _error;
   final StorageService _storage = StorageService();
+  final VideoUrlService _urlService = VideoUrlService();
 
   @override
   void initState() {
@@ -34,24 +34,34 @@ class _LandingPageState extends State<LandingPage> {
   }
 
   void _checkVideoParam() {
+    // Check both URL formats
     final uri = Uri.parse(html.window.location.href);
-    final videoCode = uri.queryParameters['video'];
+    String? videoCode;
+    
+    // Check path format (/v/CODE)
+    if (uri.path.startsWith('/v/')) {
+      videoCode = uri.path.substring(3);
+    }
+    // Check query parameter format (?video=CODE)
+    else if (uri.queryParameters.containsKey('video')) {
+      videoCode = uri.queryParameters['video'];
+    }
+
     if (videoCode != null) {
       _loadVideo(videoCode);
     }
   }
 
   Future<void> _loadVideo(String code) async {
-    if (mounted) {
-      setState(() {
-        _isLoadingVideo = true;
-        _error = null;
-      });
-    }
+    if (!mounted) return;
+
+    setState(() {
+      _isLoadingVideo = true;
+      _error = null;
+    });
 
     try {
-      final videoUrlService = VideoUrlService();
-      final videoId = await videoUrlService.getVideoId(code);
+      final videoId = await _urlService.getVideoId(code);
 
       if (videoId == null) {
         if (mounted) {
@@ -103,7 +113,7 @@ class _LandingPageState extends State<LandingPage> {
     final screenSize = MediaQuery.of(context).size;
     final isSmallScreen = screenSize.width < 600;
 
-   // Change this part in landing_page.dart
+    // Show video player if video is loaded
     if (_video != null) {
       return Scaffold(
         backgroundColor: const Color(0xFF1E1B2C),
@@ -119,7 +129,6 @@ class _LandingPageState extends State<LandingPage> {
               onDashboardPressed: () => Navigator.pushNamed(context, '/dashboard'),
             ),
             Expanded(
-              // Get videoCode from URL
               child: PublicVideoPage(
                 videoCode: Uri.parse(html.window.location.href)
                     .queryParameters['video'] ?? '',
