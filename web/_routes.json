@@ -1,15 +1,11 @@
 {
-    "version": 1,
-    "include": ["/*"],
-    "exclude": [],
-    "routes": [
-      {
-        "src": "/v/*",
-        "dest": "/index.html"
-      },
-      {
-        "src": ".*",
-        "dest": "/index.html"
-      }
-    ]
-  }
+  "version": 1,
+  "include": ["/*"],
+  "exclude": [],
+  "routes": [
+    {
+      "src": "/v/.*",
+      "dest": "/index.html"
+    }
+  ]
+}
