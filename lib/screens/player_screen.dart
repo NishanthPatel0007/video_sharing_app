@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,11 +7,15 @@ import 'package:video_player/video_player.dart';
 import '../models/video.dart';
 import '../models/view_level.dart';
 import '../services/storage_service.dart';
+import '../utils/platform_helper.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Video video;
   
-  const PlayerScreen({Key? key, required this.video}) : super(key: key);
+  const PlayerScreen({
+    Key? key,
+    required this.video,
+  }) : super(key: key);
 
   @override
   _PlayerScreenState createState() => _PlayerScreenState();
@@ -25,26 +28,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isFullScreen = false;
   bool _hasError = false;
   String _errorMessage = '';
-  Timer? _viewCountTimer;
   bool _viewCounted = false;
+  bool _isPlaying = false;
+  bool _showControls = true;
+  Timer? _hideControlsTimer;
   final StorageService _storage = StorageService();
+  
+  // Platform detection
+  final bool _isMobile = PlatformHelper.isMobileBrowser;
+  final bool _isSafari = PlatformHelper.isSafariBrowser;
+  final bool _isIOS = PlatformHelper.isIOSBrowser;
 
   @override
   void initState() {
     super.initState();
     _initializeVideo();
-    _startViewCountTimer();
   }
 
   Future<void> _initializeVideo() async {
     setState(() => _isBuffering = true);
+    
     try {
+      // Configure video headers based on platform
+      Map<String, String> headers = {
+        'Accept-Ranges': 'bytes',
+        'Access-Control-Allow-Origin': '*',
+      };
+
+      // Add platform-specific headers
+      if (_isIOS || _isSafari) {
+        headers['Range'] = 'bytes=0-';
+      }
+
+      // Initialize controller with platform-specific settings
       _controller = VideoPlayerController.network(
         widget.video.videoUrl,
-        httpHeaders: {
-          'Accept-Ranges': 'bytes',
-          'Access-Control-Allow-Origin': '*',
-        },
+        httpHeaders: headers,
         videoPlayerOptions: VideoPlayerOptions(
           mixWithOthers: true,
           allowBackgroundPlayback: false,
@@ -61,6 +80,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _hasError = false;
         });
         _controller.play();
+        _startHideControlsTimer();
       }
     } catch (e) {
       print('Video initialization error: $e');
@@ -68,32 +88,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() {
           _isBuffering = false;
           _hasError = true;
-          _errorMessage = e.toString();
+          _errorMessage = _getErrorMessage(e.toString());
         });
-        _showErrorSnackbar('Error loading video: $e');
       }
     }
   }
 
+  String _getErrorMessage(String error) {
+    // Handle common error cases
+    if (error.contains('MEDIA_ERR_SRC_NOT_SUPPORTED')) {
+      return 'This video format is not supported on your device. Please try a different browser or device.';
+    } else if (error.contains('MEDIA_ERR_NETWORK')) {
+      return 'Network error occurred. Please check your connection and try again.';
+    } else if (error.contains('MEDIA_ERR_DECODE')) {
+      return 'Unable to decode video. The file might be corrupted.';
+    }
+    return 'Error loading video: $error';
+  }
+
   void _videoListener() {
+    if (!mounted) return;
+
+    // Handle buffering state
     final isBuffering = _controller.value.isBuffering;
-    if (_isBuffering != isBuffering && mounted) {
+    if (_isBuffering != isBuffering) {
       setState(() => _isBuffering = isBuffering);
     }
 
-    // Count view when video plays for at least 5 seconds
+    // Handle playback state
+    if (_isPlaying != _controller.value.isPlaying) {
+      setState(() => _isPlaying = _controller.value.isPlaying);
+    }
+
+    // Count view after sufficient playback
     if (!_viewCounted && 
         _controller.value.position >= const Duration(seconds: 5)) {
       _countView();
     }
-  }
 
-  void _startViewCountTimer() {
-    _viewCountTimer = Timer(const Duration(seconds: 5), () {
-      if (_controller.value.isPlaying && !_viewCounted) {
-        _countView();
-      }
-    });
+    // Handle errors during playback
+    if (_controller.value.hasError) {
+      setState(() {
+        _hasError = true;
+        _errorMessage = _getErrorMessage(_controller.value.errorDescription ?? '');
+      });
+    }
   }
 
   Future<void> _countView() async {
@@ -122,7 +161,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E1633),
         title: const Text(
-          '🎉 Milestone Achieved!',
+          '🎉 New Milestone!',
           style: TextStyle(color: Colors.white),
           textAlign: TextAlign.center,
         ),
@@ -130,7 +169,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              '${level.displayText}\nReward: ${ViewLevel.formatReward(level.rewardAmount)}',
+              '${level.displayText}\nAchieved',
               style: const TextStyle(color: Colors.white70),
               textAlign: TextAlign.center,
             ),
@@ -144,6 +183,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ],
       ),
     );
+  }
+
+  void _togglePlay() {
+    if (_controller.value.isPlaying) {
+      _controller.pause();
+    } else {
+      _controller.play();
+      _startHideControlsTimer();
+    }
+    setState(() {});
   }
 
   void _toggleFullScreen() {
@@ -160,89 +209,81 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _showErrorSnackbar(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        action: SnackBarAction(
-          label: 'Retry',
-          textColor: Colors.white,
-          onPressed: _initializeVideo,
-        ),
-      ),
-    );
+  void _toggleControls() {
+    setState(() => _showControls = !_showControls);
+    if (_showControls) {
+      _startHideControlsTimer();
+    }
   }
 
-  @override
-  void dispose() {
-    _viewCountTimer?.cancel();
-    _controller.removeListener(_videoListener);
-    _controller.dispose();
-    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    super.dispose();
+  void _startHideControlsTimer() {
+    _hideControlsTimer?.cancel();
+    _hideControlsTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _controller.value.isPlaying) {
+        setState(() => _showControls = false);
+      }
+    });
+  }
+
+  void _seekTo(Duration position) {
+    _controller.seekTo(position);
+    _startHideControlsTimer();
+  }
+
+  void _seekRelative(Duration duration) {
+    final newPosition = _controller.value.position + duration;
+    _seekTo(newPosition);
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_hasError) {
-      return _buildErrorWidget();
-    }
-
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Stack(
           children: [
+            // Video Player
             Center(
-              child: _isInitialized
-                  ? AspectRatio(
-                      aspectRatio: _controller.value.aspectRatio,
-                      child: Stack(
-                        children: [
-                          VideoPlayer(_controller),
-                          _VideoControls(
-                            controller: _controller,
-                            isFullScreen: _isFullScreen,
-                            onToggleFullScreen: _toggleFullScreen,
-                          ),
-                          if (_isBuffering)
-                            const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                              ),
-                            ),
-                        ],
-                      ),
-                    )
-                  : const CircularProgressIndicator(),
+              child: _hasError 
+                ? _buildErrorWidget()
+                : _buildVideoPlayer(),
             ),
+
+            // Top Bar
             if (!_isFullScreen)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  color: Colors.black54,
-                  child: Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context),
-                      ),
-                      Expanded(
-                        child: Text(
-                          widget.video.title,
-                          style: const TextStyle(color: Colors.white),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
+              _buildTopBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVideoPlayer() {
+    if (!_isInitialized) {
+      return const CircularProgressIndicator(
+        color: Colors.white,
+      );
+    }
+
+    return GestureDetector(
+      onTap: _toggleControls,
+      child: AspectRatio(
+        aspectRatio: _controller.value.aspectRatio,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // Video
+            VideoPlayer(_controller),
+
+            // Controls Overlay
+            if (_showControls)
+              _buildControlsOverlay(),
+
+            // Loading Indicator
+            if (_isBuffering)
+              const Center(
+                child: CircularProgressIndicator(
+                  color: Colors.white,
                 ),
               ),
           ],
@@ -251,259 +292,178 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
-  Widget _buildErrorWidget() {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 64, color: Colors.red),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                'Error loading video: $_errorMessage',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _initializeVideo,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
+  Widget _buildControlsOverlay() {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.black54,
+            Colors.transparent,
+            Colors.transparent,
+            Colors.black54,
           ],
+          stops: const [0.0, 0.3, 0.7, 1.0],
         ),
       ),
-    );
-  }
-}
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // Top Controls
+          _buildTopControls(),
 
-class _VideoControls extends StatefulWidget {
-  final VideoPlayerController controller;
-  final bool isFullScreen;
-  final VoidCallback onToggleFullScreen;
-
-  const _VideoControls({
-    Key? key,
-    required this.controller,
-    required this.isFullScreen,
-    required this.onToggleFullScreen,
-  }) : super(key: key);
-
-  @override
-  _VideoControlsState createState() => _VideoControlsState();
-}
-
-class _VideoControlsState extends State<_VideoControls> {
-  bool _showControls = true;
-  Timer? _hideTimer;
-  bool _isDragging = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _startHideTimer();
-  }
-
-  void _startHideTimer() {
-    _hideTimer?.cancel();
-    if (!_isDragging) {
-      _hideTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted && widget.controller.value.isPlaying) {
-          setState(() => _showControls = false);
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _hideTimer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        setState(() => _showControls = !_showControls);
-        if (_showControls) _startHideTimer();
-      },
-      child: AnimatedOpacity(
-        opacity: _showControls ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 300),
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black54,
-                Colors.transparent,
-                Colors.transparent,
-                Colors.black54,
-              ],
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          // Bottom Controls
+          Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              _buildTopBar(),
-              _buildBottomBar(),
+              _buildProgressBar(),
+              _buildBottomControls(),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildTopBar() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
+  Widget _buildTopControls() {
+    return Container(
+      padding: const EdgeInsets.all(16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.end,
         children: [
           IconButton(
             icon: Icon(
-              widget.isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+              _isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
               color: Colors.white,
             ),
-            onPressed: widget.onToggleFullScreen,
+            onPressed: _toggleFullScreen,
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBottomBar() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildProgressBar(),
-        _buildControlButtons(),
-      ],
-    );
-  }
-
   Widget _buildProgressBar() {
-    return ValueListenableBuilder(
-      valueListenable: widget.controller,
-      builder: (context, VideoPlayerValue value, child) {
-        final duration = value.duration;
-        final position = value.position;
+    final duration = _controller.value.duration;
+    final position = _controller.value.position;
 
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
-            children: [
-              Text(
-                _formatDuration(position),
-                style: const TextStyle(color: Colors.white),
-              ),
-              Expanded(
-                child: GestureDetector(
-                  onHorizontalDragStart: (_) {
-                    _isDragging = true;
-                    setState(() => _showControls = true);
-                  },
-                  onHorizontalDragEnd: (_) {
-                    _isDragging = false;
-                    _startHideTimer();
-                  },
-                  onHorizontalDragUpdate: (details) {
-                    final box = context.findRenderObject() as RenderBox;
-                    final dx = details.localPosition.dx;
-                    final width = box.size.width;
-                    final percentage = dx / width;
-                    final position = duration * percentage;
-                    widget.controller.seekTo(position);
-                  },
-                  child: Container(
-                    height: 40,
-                    margin: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Container(
-                          height: 2,
-                          color: Colors.white24,
-                        ),
-                        Container(
-                          height: 2,
-                          width: MediaQuery.of(context).size.width *
-                              (position.inMilliseconds /
-                                  duration.inMilliseconds),
-                          color: Colors.white,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Text(
-                _formatDuration(duration),
-                style: const TextStyle(color: Colors.white),
-              ),
-            ],
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Row(
+        children: [
+          Text(
+            _formatDuration(position),
+            style: const TextStyle(color: Colors.white),
           ),
-        );
-      },
+          Expanded(
+            child: SliderTheme(
+              data: const SliderThemeData(
+                trackHeight: 2,
+                thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                value: position.inMilliseconds.toDouble(),
+                min: 0,
+                max: duration.inMilliseconds.toDouble(),
+                onChanged: (value) {
+                  _seekTo(Duration(milliseconds: value.toInt()));
+                },
+              ),
+            ),
+          ),
+          Text(
+            _formatDuration(duration),
+            style: const TextStyle(color: Colors.white),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildControlButtons() {
+  Widget _buildBottomControls() {
     return Padding(
-      padding: const EdgeInsets.all(8.0),
+      padding: const EdgeInsets.all(16),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           IconButton(
             icon: const Icon(Icons.replay_10, color: Colors.white),
-            onPressed: () {
-              final position = widget.controller.value.position;
-              widget.controller.seekTo(position - const Duration(seconds: 10));
-              _startHideTimer();
-            },
+            onPressed: () => _seekRelative(const Duration(seconds: -10)),
           ),
-          ValueListenableBuilder(
-            valueListenable: widget.controller,
-            builder: (context, VideoPlayerValue value, child) {
-              return IconButton(
-                icon: Icon(
-                  value.isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 48,
-                ),
-                onPressed: () {
-                  value.isPlaying
-                      ? widget.controller.pause()
-                      : widget.controller.play();
-                  _startHideTimer();
-                },
-              );
-            },
+          IconButton(
+            icon: Icon(
+              _controller.value.isPlaying ? Icons.pause : Icons.play_arrow,
+              color: Colors.white,
+              size: 48,
+            ),
+            onPressed: _togglePlay,
           ),
           IconButton(
             icon: const Icon(Icons.forward_10, color: Colors.white),
-            onPressed: () {
-              final position = widget.controller.value.position;
-              widget.controller.seekTo(position + const Duration(seconds: 10));
-              _startHideTimer();
-            },
+            onPressed: () => _seekRelative(const Duration(seconds: 10)),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      color: Colors.black54,
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Text(
+              widget.video.title,
+              style: const TextStyle(color: Colors.white),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorWidget() {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Icon(
+          Icons.error_outline,
+          size: 64,
+          color: Colors.red,
+        ),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: Text(
+            _errorMessage,
+            style: const TextStyle(color: Colors.white),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 24),
+        ElevatedButton.icon(
+          onPressed: _initializeVideo,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Retry'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF8257E5),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 12,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -511,158 +471,16 @@ class _VideoControlsState extends State<_VideoControls> {
     String twoDigits(int n) => n.toString().padLeft(2, '0');
     final minutes = twoDigits(duration.inMinutes.remainder(60));
     final seconds = twoDigits(duration.inSeconds.remainder(60));
-    return '$minutes:$seconds';
+    return "$minutes:$seconds";
   }
-}
-
-// Mobile Browser Detection Helper
-class _BrowserHelper {
-  static bool get isMobileBrowser {
-    final userAgent = html.window.navigator.userAgent.toLowerCase();
-    return userAgent.contains('mobile') || 
-           userAgent.contains('android') || 
-           userAgent.contains('iphone');
-  }
-
-  static bool get isSafari {
-    final userAgent = html.window.navigator.userAgent.toLowerCase();
-    return userAgent.contains('safari') && !userAgent.contains('chrome');
-  }
-
-  static bool get isIOS {
-    final userAgent = html.window.navigator.userAgent.toLowerCase();
-    return userAgent.contains('iphone') || 
-           userAgent.contains('ipad') || 
-           userAgent.contains('ipod');
-  }
-
-  static Map<String, String> getVideoHeaders() {
-    if (isIOS) {
-      return {
-        'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*',
-        'Range': 'bytes=0-',
-      };
-    }
-    return {
-      'Accept-Ranges': 'bytes',
-      'Access-Control-Allow-Origin': '*',
-    };
-  }
-}
-
-// Custom Video Progress Indicator
-class _CustomVideoProgressIndicator extends StatelessWidget {
-  final VideoPlayerController controller;
-  final bool allowScrubbing;
-  final Color backgroundColor;
-  final Color progressColor;
-
-  const _CustomVideoProgressIndicator(
-    this.controller, {
-    this.allowScrubbing = true,
-    this.backgroundColor = const Color(0x5A000000),
-    this.progressColor = const Color(0xFF8257E5),
-  });
 
   @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder(
-      valueListenable: controller,
-      builder: (context, VideoPlayerValue value, child) {
-        if (value.duration == Duration.zero) {
-          return const SizedBox();
-        }
-
-        return GestureDetector(
-          onHorizontalDragStart: allowScrubbing ? (DragStartDetails details) {
-            controller.pause();
-          } : null,
-          onHorizontalDragUpdate: allowScrubbing ? (DragUpdateDetails details) {
-            final box = context.findRenderObject() as RenderBox;
-            final Offset localPosition = box.globalToLocal(details.globalPosition);
-            final double progress = localPosition.dx / box.size.width;
-            controller.seekTo(value.duration * progress);
-          } : null,
-          onHorizontalDragEnd: allowScrubbing ? (DragEndDetails details) {
-            controller.play();
-          } : null,
-          onTapDown: allowScrubbing ? (TapDownDetails details) {
-            final box = context.findRenderObject() as RenderBox;
-            final Offset localPosition = box.globalToLocal(details.globalPosition);
-            final double progress = localPosition.dx / box.size.width;
-            controller.seekTo(value.duration * progress);
-          } : null,
-          child: Stack(
-            children: [
-              Container(
-                height: 4.0,
-                color: backgroundColor,
-              ),
-              FractionallySizedBox(
-                widthFactor: value.position.inMilliseconds / 
-                            value.duration.inMilliseconds,
-                child: Container(
-                  height: 4.0,
-                  color: progressColor,
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-// Video Error Widget
-class _VideoErrorWidget extends StatelessWidget {
-  final String error;
-  final VoidCallback onRetry;
-
-  const _VideoErrorWidget({
-    required this.error,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      color: Colors.black,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              color: Colors.red,
-              size: 64,
-            ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(
-                error,
-                style: const TextStyle(color: Colors.white),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: onRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF8257E5),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+  void dispose() {
+    _hideControlsTimer?.cancel();
+    _controller.removeListener(_videoListener);
+    _controller.dispose();
+    SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
   }
 }

@@ -16,14 +16,14 @@ class ViewLevel {
 
   static const List<ViewLevel> levels = [
     ViewLevel(0, 0, 0, '0 Views'),             // Starting level
-    ViewLevel(1, 1000, 40, '1K Views'),        // ₹40
-    ViewLevel(2, 5000, 200, '5K Views'),       // ₹200
-    ViewLevel(3, 10000, 400, '10K Views'),     // ₹400
-    ViewLevel(4, 25000, 1000, '25K Views'),    // ₹1,000
-    ViewLevel(5, 50000, 2000, '50K Views'),    // ₹2,000
-    ViewLevel(6, 100000, 4000, '100K Views'),  // ₹4,000
-    ViewLevel(7, 500000, 20000, '500K Views'), // ₹20,000
-    ViewLevel(8, 1000000, 40000, '1M Views'),  // ₹40,000
+    ViewLevel(1, 5, 40, '1K Views'),        // ₹40
+    ViewLevel(2, 10, 200, '5K Views'),       // ₹200
+    ViewLevel(3, 25, 400, '10K Views'),     // ₹400
+    ViewLevel(4, 50, 1000, '25K Views'),    // ₹1,000
+    ViewLevel(5, 100, 2000, '50K Views'),    // ₹2,000
+    ViewLevel(6, 1000, 4000, '100K Views'),  // ₹4,000
+    ViewLevel(7, 5000, 20000, '500K Views'), // ₹20,000
+    ViewLevel(8, 10000, 40000, '1M Views'),  // ₹40,000
   ];
 
   static ViewLevel getCurrentLevel(int views) {

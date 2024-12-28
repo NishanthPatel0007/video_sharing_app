@@ -1,4 +1,4 @@
-// lib/services/video_url_service.dart
+import 'dart:async';
 import 'dart:html' as html;
 import 'dart:math';
 
@@ -12,120 +12,146 @@ class VideoUrlService {
   static const String _baseUrl = 'https://for10cloud.com/v/';
   static const String _allowedChars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   static const int _codeLength = 5;
+  static const int _maxRetries = 3;
+  
+  // Cache for generated URLs to prevent unnecessary database calls
+  final Map<String, String> _urlCache = {};
 
-  // Get the share URL for a video
+  // Get the share URL for a video with retries and caching
   Future<String?> getShareUrl(String videoId) async {
-    try {
-      final code = await getOrCreateShareCode(videoId);
-      return '$_baseUrl$code';
-    } catch (e) {
-      debugPrint('Error generating share URL: $e');
-      return null;
+    // Check cache first
+    if (_urlCache.containsKey(videoId)) {
+      return _urlCache[videoId];
     }
+
+    for (int attempt = 0; attempt < _maxRetries; attempt++) {
+      try {
+        final code = await getOrCreateShareCode(videoId);
+        final url = '$_baseUrl$code';
+        
+        // Cache the successful result
+        _urlCache[videoId] = url;
+        return url;
+      } catch (e) {
+        debugPrint('Error generating share URL (attempt ${attempt + 1}): $e');
+        if (attempt == _maxRetries - 1) {
+          rethrow;
+        }
+        await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+      }
+    }
+    return null;
   }
 
-  // Copy URL to clipboard with browser compatibility
+  // Copy URL to clipboard with platform-specific handling
   Future<void> copyToClipboard(String videoId, BuildContext context) async {
+    String? shareUrl;
     try {
-      final code = await getOrCreateShareCode(videoId);
-      final shareUrl = '$_baseUrl$code';
+      // Generate or get URL first
+      shareUrl = await getShareUrl(videoId);
+      if (shareUrl == null) throw Exception('Failed to generate share URL');
+
+      // Try different clipboard methods based on platform
+      bool success = false;
       
-      if (kIsWeb) {
-        await _webCopyToClipboard(shareUrl);
-      } else {
+      // Method 1: Standard Flutter clipboard
+      try {
         await Clipboard.setData(ClipboardData(text: shareUrl));
+        success = true;
+      } catch (e) {
+        debugPrint('Standard clipboard failed: $e');
       }
-      
+
+      // Method 2: Web Clipboard API
+      if (!success && kIsWeb) {
+        try {
+          success = await _webCopyToClipboard(shareUrl);
+        } catch (e) {
+          debugPrint('Web clipboard API failed: $e');
+        }
+      }
+
+      // Method 3: Legacy execCommand
+      if (!success && kIsWeb) {
+        success = await _legacyCopyToClipboard(shareUrl);
+      }
+
+      // Show appropriate feedback
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('URL copied to clipboard!'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
+        if (success) {
+          _showSuccessSnackbar(context);
+        } else {
+          _showManualCopyDialog(context, shareUrl);
+        }
       }
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to copy URL: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
       debugPrint('Copy to clipboard error: $e');
-    }
-  }
-
-  // Web-specific clipboard handling
-  Future<void> _webCopyToClipboard(String text) async {
-    try {
-      // Try modern clipboard API first
-      if (html.window.navigator.clipboard != null) {
-        await html.window.navigator.clipboard?.writeText(text);
-        return;
+      if (context.mounted) {
+        _showErrorSnackbar(context, shareUrl);
       }
-      
-      // Fallback for older browsers
-      final textarea = html.TextAreaElement()
-        ..value = text
-        ..style.position = 'fixed'
-        ..style.left = '-9999px'
-        ..style.opacity = '0';
-      html.document.body?.append(textarea);
-      
-      // Select and copy
-      textarea.select();
-      final successful = html.document.execCommand('copy');
-      textarea.remove();
-
-      if (!successful) throw Exception('Copy command failed');
-    } catch (e) {
-      debugPrint('Web clipboard error: $e');
-      throw Exception('Failed to copy text');
     }
   }
 
-  // Get video ID from share code
+  // Web Clipboard API implementation
+  Future<bool> _webCopyToClipboard(String text) async {
+    try {
+      await html.window.navigator.clipboard?.writeText(text);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // Legacy clipboard implementation for older browsers
+  Future<bool> _legacyCopyToClipboard(String text) async {
+    final textarea = html.TextAreaElement()
+      ..value = text
+      ..style.position = 'fixed'
+      ..style.left = '-9999px'
+      ..style.opacity = '0';
+    html.document.body?.append(textarea);
+
+    try {
+      textarea.select();
+      final success = html.document.execCommand('copy');
+      textarea.remove();
+      return success;
+    } catch (e) {
+      textarea.remove();
+      return false;
+    }
+  }
+
+  // Get video ID from share code with improved error handling
   Future<String?> getVideoId(String code) async {
     try {
-      // Clean the code from URL
+      // Clean and validate the code
       final cleanCode = _cleanVideoCode(code);
       if (cleanCode == null) return null;
-      
+
       final doc = await _firestore
           .collection('video_urls')
           .doc(cleanCode)
           .get();
 
-      if (doc.exists) {
-        // Update analytics
-        await doc.reference.update({
-          'visits': FieldValue.increment(1),
-          'lastAccessed': FieldValue.serverTimestamp(),
-          'browserInfo': {
-            'userAgent': html.window.navigator.userAgent,
-            'platform': html.window.navigator.platform,
-            'timestamp': FieldValue.serverTimestamp(),
-          }
-        });
-        
-        return doc.data()?['videoId'];
-      }
-      return null;
+      if (!doc.exists) return null;
+
+      // Update analytics in the background
+      _updateAnalytics(doc.reference).catchError((e) {
+        debugPrint('Analytics update error: $e');
+      });
+
+      return doc.data()?['videoId'];
     } catch (e) {
       debugPrint('Error getting video ID: $e');
       return null;
     }
   }
 
-  // Create or get existing share code
+  // Create or get existing share code with improved error handling
   Future<String> getOrCreateShareCode(String videoId) async {
     try {
-      // Check existing code
+      // Check existing code first
       final existing = await _firestore
           .collection('video_urls')
           .where('videoId', isEqualTo: videoId)
@@ -136,12 +162,10 @@ class VideoUrlService {
         return existing.docs.first.data()['shortCode'];
       }
 
-      // Generate new code
+      // Generate new code with retries
       String? code;
       int attempts = 0;
-      const maxAttempts = 5;
-
-      while (attempts < maxAttempts) {
+      while (attempts < _maxRetries) {
         code = _generateCode();
         final doc = await _firestore
             .collection('video_urls')
@@ -149,7 +173,7 @@ class VideoUrlService {
             .get();
 
         if (!doc.exists) {
-          // Save new code
+          // Save new code with platform info
           await _firestore.collection('video_urls').doc(code).set({
             'videoId': videoId,
             'shortCode': code,
@@ -161,18 +185,17 @@ class VideoUrlService {
               'userAgent': html.window.navigator.userAgent,
               'platform': html.window.navigator.platform,
               'timestamp': FieldValue.serverTimestamp(),
+              'isWebApp': kIsWeb,
             }
           });
-          
           return code;
         }
         attempts++;
       }
-      
-      throw Exception('Failed to generate unique code after $maxAttempts attempts');
+      throw Exception('Failed to generate unique code after $_maxRetries attempts');
     } catch (e) {
       debugPrint('Error generating share code: $e');
-      throw Exception('Failed to generate share code');
+      throw Exception('Failed to generate share code: $e');
     }
   }
 
@@ -196,10 +219,10 @@ class VideoUrlService {
           code = uri.pathSegments.last;
         }
       }
-      
+
       // Clean query parameters
       code = code.split('?').first;
-      
+
       // Validate code format
       if (code.length == _codeLength && 
           code.split('').every((char) => _allowedChars.contains(char))) {
@@ -212,38 +235,76 @@ class VideoUrlService {
     }
   }
 
-  // Get video analytics
-  Future<Map<String, dynamic>> getVideoAnalytics(String videoId) async {
+  // Update analytics in the background
+  Future<void> _updateAnalytics(DocumentReference docRef) async {
     try {
-      final urlDoc = await _firestore
-          .collection('video_urls')
-          .where('videoId', isEqualTo: videoId)
-          .limit(1)
-          .get();
-
-      if (urlDoc.docs.isNotEmpty) {
-        final data = urlDoc.docs.first.data();
-        return {
-          'visits': data['visits'] ?? 0,
-          'lastAccessed': data['lastAccessed'],
-          'shortCode': data['shortCode'],
-          'status': data['status'] ?? 'active'
-        };
-      }
-      return {'visits': 0, 'status': 'no_url'};
+      await docRef.update({
+        'visits': FieldValue.increment(1),
+        'lastAccessed': FieldValue.serverTimestamp(),
+        'accessInfo': {
+          'userAgent': html.window.navigator.userAgent,
+          'platform': html.window.navigator.platform,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isWebApp': kIsWeb,
+        }
+      });
     } catch (e) {
-      debugPrint('Error getting video analytics: $e');
-      return {'error': e.toString()};
+      debugPrint('Analytics update failed: $e');
     }
   }
 
-  // Validate video code format
-  bool isValidVideoCode(String code) {
-    return _cleanVideoCode(code) != null;
+  // UI Feedback Methods
+  void _showSuccessSnackbar(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('URL copied to clipboard!'),
+        backgroundColor: Colors.green,
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
-  // Parse video code from any URL format
-  String? parseVideoCode(String url) {
-    return _cleanVideoCode(url);
+  void _showErrorSnackbar(BuildContext context, String? url) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Failed to copy URL'),
+        backgroundColor: Colors.red,
+        action: url != null ? SnackBarAction(
+          label: 'Show URL',
+          textColor: Colors.white,
+          onPressed: () => _showManualCopyDialog(context, url),
+        ) : null,
+      ),
+    );
+  }
+
+  void _showManualCopyDialog(BuildContext context, String url) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Share URL'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Please copy this URL manually:',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              url,
+              style: const TextStyle(fontFamily: 'monospace'),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 }
