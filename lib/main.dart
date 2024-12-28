@@ -1,13 +1,12 @@
-import 'dart:html' as html;
-
+// lib/main.dart
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import 'screens/dashboard_screen.dart';
 import 'screens/landing_page.dart';
 import 'screens/login_screen.dart';
+import 'screens/payment_settings_screen.dart';
 import 'screens/public_player_screen.dart';
 import 'services/auth_service.dart';
 
@@ -38,23 +37,27 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: 'Video Sharing',
+        title: 'For10Cloud',
         theme: ThemeData(
           primaryColor: const Color(0xFF8257E5),
-          brightness: Brightness.light,
           scaffoldBackgroundColor: const Color(0xFF1E1B2C),
           appBarTheme: const AppBarTheme(
             backgroundColor: Color(0xFF2D2940),
             elevation: 0,
-            systemOverlayStyle: SystemUiOverlayStyle.light,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8257E5),
+              foregroundColor: Colors.white,
+            ),
           ),
         ),
         initialRoute: '/',
         // Handle initial route based on URL
         onGenerateInitialRoutes: (String initialRoute) {
-          final uri = Uri.parse(html.window.location.href);
+          final uri = Uri.parse(initialRoute);
           
-          // Handle direct video URLs (/v/CODE)
+          // Handle video URLs
           if (uri.path.startsWith('/v/')) {
             final videoCode = uri.path.substring(3);
             return [
@@ -64,27 +67,19 @@ class MyApp extends StatelessWidget {
             ];
           }
           
-          // Handle query parameter video URLs (/?video=CODE)
-          if (uri.queryParameters.containsKey('video')) {
-            return [
-              MaterialPageRoute(
-                builder: (context) => PublicVideoPage(
-                  videoCode: uri.queryParameters['video']!,
-                ),
-              ),
-            ];
-          }
-          
-          // Default landing page
           return [
             MaterialPageRoute(
               builder: (context) => const LandingPage(),
             ),
           ];
         },
+        // Define routes
         routes: {
           '/login': (context) => const LoginScreen(),
           '/dashboard': (context) => _buildProtectedRoute(const DashboardScreen()),
+          '/payment-settings': (context) => _buildProtectedRoute(
+            const PaymentSettingsScreen(),
+          ),
         },
         // Handle dynamic routes
         onGenerateRoute: (settings) {
@@ -98,7 +93,7 @@ class MyApp extends StatelessWidget {
               builder: (context) => PublicVideoPage(videoCode: videoCode),
             );
           }
-          
+
           // Handle query parameter video URLs
           if (uri.queryParameters.containsKey('video')) {
             return MaterialPageRoute(
@@ -120,7 +115,15 @@ class MyApp extends StatelessWidget {
               );
             case '/dashboard':
               return MaterialPageRoute(
-                builder: (context) => _buildProtectedRoute(const DashboardScreen()),
+                builder: (context) => _buildProtectedRoute(
+                  const DashboardScreen(),
+                ),
+              );
+            case '/payment-settings':
+              return MaterialPageRoute(
+                builder: (context) => _buildProtectedRoute(
+                  const PaymentSettingsScreen(),
+                ),
               );
             default:
               return MaterialPageRoute(
@@ -164,13 +167,6 @@ class MyApp extends StatelessWidget {
                       onPressed: () {
                         Navigator.pushReplacementNamed(context, '/');
                       },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF8257E5),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 12,
-                        ),
-                      ),
                       child: const Text('Go Home'),
                     ),
                   ],

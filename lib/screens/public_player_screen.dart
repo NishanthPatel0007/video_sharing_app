@@ -1,5 +1,6 @@
-// lib/screens/public_video_page.dart
+// lib/screens/public_player_screen.dart
 import 'dart:async';
+import 'dart:html' as html;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/video.dart';
+import '../models/view_level.dart';
 import '../services/storage_service.dart';
 import '../services/video_url_service.dart';
 
@@ -22,11 +24,14 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
   bool _isLoading = true;
   String? _error;
   Video? _video;
-  final StorageService _storage = StorageService();
   VideoPlayerController? _controller;
   bool _showControls = true;
   Timer? _hideControlsTimer;
   bool _isFullScreen = false;
+  bool _viewCounted = false;
+  bool _hasError = false;
+  final StorageService _storage = StorageService();
+  final VideoUrlService _urlService = VideoUrlService();
 
   @override
   void initState() {
@@ -41,8 +46,7 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
         _error = null;
       });
 
-      // Get video from code
-      final videoId = await VideoUrlService().getVideoId(widget.videoCode);
+      final videoId = await _urlService.getVideoId(widget.videoCode);
       if (videoId == null) throw Exception('Video not found');
 
       final videoDoc = await FirebaseFirestore.instance
@@ -53,15 +57,15 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
       if (!videoDoc.exists) throw Exception('Video not found');
 
       final video = Video.fromFirestore(videoDoc);
-      await _storage.incrementViews(videoId);
 
       // Initialize video player
       _controller = VideoPlayerController.network(
         video.videoUrl,
-        httpHeaders: {
-          'Access-Control-Allow-Origin': '*',
-          'Accept-Ranges': 'bytes',
-        },
+        httpHeaders: _getVideoHeaders(),
+        videoPlayerOptions: VideoPlayerOptions(
+          mixWithOthers: true,
+          allowBackgroundPlayback: false,
+        ),
       );
 
       await _controller!.initialize();
@@ -73,24 +77,99 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
           _isLoading = false;
         });
         _controller!.play();
+        _startHideControlsTimer();
       }
 
     } catch (e) {
+      print('Error loading video: $e');
       if (mounted) {
         setState(() {
           _error = e.toString();
           _isLoading = false;
+          _hasError = true;
         });
       }
     }
+  }
+
+  Map<String, String> _getVideoHeaders() {
+    final isSafari = html.window.navigator.userAgent.toLowerCase().contains('safari') &&
+                     !html.window.navigator.userAgent.toLowerCase().contains('chrome');
+    final headers = {
+      'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
+    };
+
+    if (isSafari) {
+      headers['Range'] = 'bytes=0-';
+    }
+
+    return headers;
   }
 
   void _videoListener() {
     if (_controller?.value.hasError ?? false) {
       setState(() {
         _error = 'Video playback error';
+        _hasError = true;
       });
     }
+
+    // Count view after 5 seconds of playback
+    if (!_viewCounted && 
+        (_controller?.value.position.inSeconds ?? 0) >= 5) {
+      _countView();
+    }
+  }
+
+  Future<void> _countView() async {
+    if (_viewCounted || _video == null) return;
+    _viewCounted = true;
+
+    try {
+      await _storage.incrementViews(_video!.id);
+
+      final nextLevel = ViewLevel.getNextLevel(_video!.views + 1);
+      if (nextLevel != null && 
+          _video!.views < nextLevel.requiredViews && 
+          (_video!.views + 1) >= nextLevel.requiredViews) {
+        _showMilestoneAchieved(nextLevel);
+      }
+    } catch (e) {
+      print('Failed to count view: $e');
+    }
+  }
+
+  void _showMilestoneAchieved(ViewLevel level) {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1633),
+        title: const Text(
+          '🎉 New Milestone!',
+          style: TextStyle(color: Colors.white),
+          textAlign: TextAlign.center,
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              '${level.displayText}\nAchieved',
+              style: const TextStyle(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
   }
 
   void _togglePlay() {
@@ -118,8 +197,10 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     } else {
       SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
   }
 
@@ -162,14 +243,19 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
                     icon: const Icon(Icons.arrow_back, color: Colors.white),
                     onPressed: () => Navigator.pop(context),
                   ),
-                  const Text(
-                    'For10Cloud Shared',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
+                  if (_video != null) ...[
+                    Expanded(
+                      child: Text(
+                        _video!.title,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),
@@ -238,18 +324,26 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
                           child: SliderTheme(
                             data: SliderTheme.of(context).copyWith(
                               trackHeight: 2,
-                              thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                              overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                              activeTrackColor: Colors.purple,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                overlayRadius: 12
+                              ),
+                              activeTrackColor: const Color(0xFF8257E5),
                               inactiveTrackColor: Colors.grey[700],
-                              thumbColor: Colors.purple,
+                              thumbColor: const Color(0xFF8257E5),
                             ),
                             child: Slider(
-                              value: _controller!.value.position.inMilliseconds.toDouble(),
+                              value: _controller!.value.position.inMilliseconds
+                                  .toDouble(),
                               min: 0,
-                              max: _controller!.value.duration.inMilliseconds.toDouble(),
+                              max: _controller!.value.duration.inMilliseconds
+                                  .toDouble(),
                               onChanged: (value) {
-                                _controller!.seekTo(Duration(milliseconds: value.toInt()));
+                                _controller!.seekTo(
+                                  Duration(milliseconds: value.toInt())
+                                );
                               },
                             ),
                           ),
@@ -272,10 +366,16 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
                           icon: const Icon(Icons.replay_5),
                           color: Colors.white,
                           iconSize: 32,
-                          onPressed: () => _seekRelative(const Duration(seconds: -5)),
+                          onPressed: () => _seekRelative(
+                            const Duration(seconds: -5)
+                          ),
                         ),
                         IconButton(
-                          icon: Icon(_controller!.value.isPlaying ? Icons.pause : Icons.play_arrow),
+                          icon: Icon(
+                            _controller!.value.isPlaying 
+                              ? Icons.pause 
+                              : Icons.play_arrow
+                          ),
                           color: Colors.white,
                           iconSize: 48,
                           onPressed: _togglePlay,
@@ -284,10 +384,16 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
                           icon: const Icon(Icons.forward_5),
                           color: Colors.white,
                           iconSize: 32,
-                          onPressed: () => _seekRelative(const Duration(seconds: 5)),
+                          onPressed: () => _seekRelative(
+                            const Duration(seconds: 5)
+                          ),
                         ),
                         IconButton(
-                          icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+                          icon: Icon(
+                            _isFullScreen 
+                              ? Icons.fullscreen_exit 
+                              : Icons.fullscreen
+                          ),
                           color: Colors.white,
                           iconSize: 32,
                           onPressed: _toggleFullScreen,
@@ -296,6 +402,14 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
                     ),
                   ),
                 ],
+              ),
+
+            // Loading Indicator
+            if (_controller!.value.isBuffering)
+              const Center(
+                child: CircularProgressIndicator(
+                  color: Color(0xFF8257E5),
+                ),
               ),
           ],
         ),
@@ -322,7 +436,7 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
           ElevatedButton(
             onPressed: _loadVideo,
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
+              backgroundColor: const Color(0xFF8257E5),
               padding: const EdgeInsets.symmetric(
                 horizontal: 24,
                 vertical: 12,
@@ -341,6 +455,7 @@ class _PublicVideoPageState extends State<PublicVideoPage> {
     _controller?.removeListener(_videoListener);
     _controller?.dispose();
     SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 }

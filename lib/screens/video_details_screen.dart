@@ -1,10 +1,13 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/video.dart';
+import '../models/view_level.dart';
+import '../screens/player_screen.dart';
+import '../services/storage_service.dart';
 import '../services/video_url_service.dart';
 import '../widgets/view_milestone_widget.dart';
-import 'player_screen.dart';
 
 class VideoDetailsScreen extends StatefulWidget {
   final Video video;
@@ -22,8 +25,14 @@ class VideoDetailsScreen extends StatefulWidget {
 
 class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
   final VideoUrlService _urlService = VideoUrlService();
+  final StorageService _storage = StorageService();
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  
   bool _isGeneratingUrl = false;
+  bool _isProcessingClaim = false;
   String? _shareUrl;
+  bool _isDeleting = false;
 
   @override
   void initState() {
@@ -38,21 +47,61 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
         setState(() => _shareUrl = url);
       }
     } catch (e) {
-      print('Error loading share URL: $e');
+      debugPrint('Error loading share URL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load share URL: $e')),
+        );
+      }
     }
   }
 
-  Future<void> _confirmDelete(BuildContext context) async {
+  Future<void> handleMilestoneClaim(int level, double amount) async {
+    if (_isProcessingClaim) return;
+
+    setState(() => _isProcessingClaim = true);
+    try {
+      // First check if payment details exist
+      final paymentDetails = await _storage.getPaymentDetails();
+      if (paymentDetails == null || !paymentDetails.isComplete) {
+        _showPaymentDetailsDialog();
+        return;
+      }
+
+      await _storage.processMilestoneClaim(
+        videoId: widget.video.id,
+        level: level,
+        amount: amount,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Milestone claimed successfully!')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Milestone claim error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to claim milestone: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isProcessingClaim = false);
+    }
+  }
+
+  void _showPaymentDetailsDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1B2C),
+        backgroundColor: const Color(0xFF2D2940),
         title: const Text(
-          'Delete Video',
+          'Payment Details Required',
           style: TextStyle(color: Colors.white),
         ),
         content: const Text(
-          'Are you sure you want to delete this video? This action cannot be undone.',
+          'Please add your payment details before claiming rewards.',
           style: TextStyle(color: Colors.white70),
         ),
         actions: [
@@ -63,11 +112,85 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
               style: TextStyle(color: Colors.white70),
             ),
           ),
-          TextButton(
+          ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              widget.onDelete();
+              Navigator.pushNamed(context, '/payment-settings');
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF8257E5),
+            ),
+            child: const Text('Add Details'),
+          ),
+        ],
+      ),
+    );
+  }
+  
+
+  Future<void> _confirmDelete() async {
+    if (_isDeleting) return;
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF2D2940),
+        title: const Text(
+          'Delete Video',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Are you sure you want to delete this video?',
+              style: TextStyle(color: Colors.white70),
+            ),
+            const SizedBox(height: 8),
+            if (widget.video.totalEarnings > 0) ...[
+              const Text(
+                'Warning: All unclaimed rewards will be lost.',
+                style: TextStyle(color: Colors.orange),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Total Earnings: ${ViewLevel.formatReward(widget.video.totalEarnings)}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ],
+            const SizedBox(height: 16),
+            const Text(
+              'This action cannot be undone.',
+              style: TextStyle(color: Colors.red),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white70),
+            ),
+          ),
+          TextButton(
+            onPressed: () async {
+              setState(() => _isDeleting = true);
               Navigator.pop(context);
+              
+              try {
+                await widget.onDelete();
+                if (mounted) Navigator.pop(context);
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to delete video: $e')),
+                  );
+                }
+              } finally {
+                if (mounted) setState(() => _isDeleting = false);
+              }
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
@@ -75,6 +198,23 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
         ],
       ),
     );
+  }
+
+  String _formatTimeAgo(DateTime date) {
+    final difference = DateTime.now().difference(date);
+    if (difference.inDays > 365) {
+      return '${(difference.inDays / 365).floor()} years ago';
+    } else if (difference.inDays > 30) {
+      return '${(difference.inDays / 30).floor()} months ago';
+    } else if (difference.inDays > 0) {
+      return '${difference.inDays} days ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours} hours ago';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes} minutes ago';
+    } else {
+      return 'Just now';
+    }
   }
 
   @override
@@ -91,8 +231,17 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
         actions: [
           if (FirebaseAuth.instance.currentUser?.uid == widget.video.userId)
             IconButton(
-              icon: const Icon(Icons.delete, color: Colors.white),
-              onPressed: () => _confirmDelete(context),
+              icon: _isDeleting 
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.red,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.delete, color: Colors.white),
+              onPressed: _isDeleting ? null : _confirmDelete,
               tooltip: 'Delete Video',
             ),
         ],
@@ -174,7 +323,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                   Row(
                     children: [
                       Text(
-                        '${widget.video.views} views',
+                        widget.video.getFormattedViews(),
                         style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 14,
@@ -187,7 +336,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        _formatDate(widget.video.createdAt),
+                        _formatTimeAgo(widget.video.createdAt),
                         style: const TextStyle(
                           color: Colors.white70,
                           fontSize: 14,
@@ -230,9 +379,26 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                           color: Colors.white,
                         ),
                       ),
-                      const Text(
-                        'Uploader',
-                        style: TextStyle(color: Colors.white70),
+                      Row(
+                        children: [
+                          const Text(
+                            'Uploader',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                          if (widget.video.totalEarnings > 0) ...[
+                            const Text(
+                              ' • ',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                            Text(
+                              'Earned ${ViewLevel.formatReward(widget.video.totalEarnings)}',
+                              style: const TextStyle(
+                                color: Color(0xFF8257E5),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ],
                       ),
                     ],
                   ),
@@ -255,9 +421,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'COPY TO CLIPBOARD',
+                    'SHARE VIDEO',
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: 16,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 1,
                       color: Colors.white,
@@ -273,10 +439,17 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF1E1B2C),
                       borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: const Color(0xFF3D3950),
+                        width: 1,
+                      ),
                     ),
                     child: SelectableText(
                       _shareUrl ?? 'https://for10cloud.com/v/...',
-                      style: const TextStyle(color: Colors.white70),
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontFamily: 'monospace',
+                      ),
                       textAlign: TextAlign.center,
                     ),
                   ),
@@ -286,36 +459,53 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                         ? null
                         : () async {
                             setState(() => _isGeneratingUrl = true);
-                            await _urlService.copyToClipboard(
-                              widget.video.id,
-                              context,
-                            );
-                            setState(() => _isGeneratingUrl = false);
+                            try {
+                              await _urlService.copyToClipboard(
+                                widget.video.id,
+                                context,
+                              );
+                            } finally {
+                              if (mounted) {
+                                setState(() => _isGeneratingUrl = false);
+                              }
+                            }
                           },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
+                      backgroundColor: const Color(0xFF8257E5),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    child: _isGeneratingUrl
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                   // Fix this part in the Share URL Section
+                      child: _isGeneratingUrl
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: const [
+                                Icon(
+                                  Icons.content_copy,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Copy Link',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ),
-                          )
-                        : const Text(
-                            'Copy',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
                   ),
                 ],
               ),
@@ -332,7 +522,55 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                   color: const Color(0xFF2D2940),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: ViewMilestoneWidget(views: widget.video.views),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'View Milestones',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                        if (widget.video.getRemainingClaimableAmount() > 0)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF8257E5).withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: const Color(0xFF8257E5),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              'Available: ${ViewLevel.formatReward(widget.video.getRemainingClaimableAmount())}',
+                              style: const TextStyle(
+                                color: Color(0xFF8257E5),
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 24),
+                    ViewMilestoneWidget(
+                      views: widget.video.views,
+                      lastClaimedLevel: widget.video.lastClaimedLevel,
+                      onClaimPressed: handleMilestoneClaim,
+                      isProcessingClaim: _isProcessingClaim,
+                      claimedMilestones: widget.video.claimedMilestones,
+                    ),
+                  ],
+                ),
               ),
             ),
             
@@ -341,22 +579,5 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
         ),
       ),
     );
-  }
-
-  String _formatDate(DateTime date) {
-    final difference = DateTime.now().difference(date);
-    if (difference.inDays > 365) {
-      return '${(difference.inDays / 365).floor()} years ago';
-    } else if (difference.inDays > 30) {
-      return '${(difference.inDays / 30).floor()} months ago';
-    } else if (difference.inDays > 0) {
-      return '${difference.inDays} days ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} hours ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} minutes ago';
-    } else {
-      return 'Just now';
-    }
   }
 }

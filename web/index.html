@@ -8,8 +8,24 @@
   <meta property="og:title" content="For10Cloud Video">
   <meta property="og:description" content="Cloud Storage WebApplication">
   <meta property="og:image" content="/thumbnail.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  
+  <!-- PWA meta tags -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Video Sharing">
+  <meta name="mobile-web-app-capable" content="yes">
   <link rel="canonical" href="https://for10cloud.com">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Video playback support -->
+  <meta name="video-playsinline" content="true">
+  <meta name="playsinline" content="true">
+
+  <!-- CORS and Security Headers -->
+  <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
+  <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
+  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
+
   <title>Video Sharing App</title>
 
   <!-- Firebase SDK -->
@@ -17,6 +33,7 @@
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-firestore-compat.js"></script>
   
+  <!-- Firebase Configuration -->
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyDC2U3n6TFc0QIlAp6e64PJjVnPYhdb8qI",
@@ -30,12 +47,42 @@
     firebase.initializeApp(firebaseConfig);
   </script>
 
+  <!-- Flutter initialization -->
   <script>
     var serviceWorkerVersion = null;
+
+    // Platform detection
+    window.isMobileBrowser = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+    window.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    window.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    // Clipboard API support check
+    window.hasClipboardAPI = navigator.clipboard && navigator.clipboard.writeText;
+
+    // Add error handling for video player
+    window.addEventListener('error', function(e) {
+      if (e.target.tagName === 'VIDEO') {
+        console.error('Video error:', e);
+        e.target.load(); // Attempt to reload the video
+      }
+    }, true);
+
+    // Prevent iOS video fullscreen issues
+    document.addEventListener('webkitfullscreenchange', function() {
+      if (document.webkitFullscreenElement === null) {
+        const videos = document.getElementsByTagName('video');
+        for (let video of videos) {
+          video.style.width = '100%';
+          video.style.height = 'auto';
+        }
+      }
+    });
   </script>
-  <script src="flutter.js"></script>
+
+  <script src="flutter.js" defer></script>
 
   <style>
+    /* Loading animation */
     .loading {
       display: flex;
       justify-content: center;
@@ -43,14 +90,14 @@
       height: 100vh;
       width: 100vw;
       position: fixed;
-      background: white;
+      background: #1E1B2C;
       z-index: 999;
     }
     .loader {
       width: 48px;
       height: 48px;
-      border: 5px solid #FFF;
-      border-bottom-color: #FF3D00;
+      border: 5px solid #2A2141;
+      border-bottom-color: #8257E5;
       border-radius: 50%;
       display: inline-block;
       box-sizing: border-box;
@@ -60,6 +107,50 @@
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
+
+    /* Mobile optimizations */
+    @media (max-width: 768px) {
+      body {
+        overscroll-behavior-y: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      video::-webkit-media-controls {
+        display: none !important;
+      }
+
+      video::-webkit-media-controls-enclosure {
+        display: none !important;
+      }
+    }
+
+    /* Prevent text selection on buttons */
+    button {
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+
+    /* Hide native video controls */
+    video::-webkit-media-controls {
+      display: none !important;
+    }
+
+    /* Fix Safari video playback */
+    video {
+      object-fit: contain;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Improve mobile touch targets */
+    input, button {
+      min-height: 44px;
+      min-width: 44px;
+    }
   </style>
 </head>
 <body>
@@ -68,17 +159,59 @@
   </div>
 
   <script>
-    window.addEventListener('load', function() {
-      _flutter.loader.loadEntrypoint({
-        serviceWorker: {
-          serviceWorkerVersion: serviceWorkerVersion,
-        },
-        onEntrypointLoaded: async function(engineInitializer) {
-          let appRunner = await engineInitializer.initializeEngine();
-          await appRunner.runApp();
-          document.querySelector('#loading').remove();
+    window.addEventListener('load', async function() {
+      try {
+        const flutterWebRenderer = 'html';
+
+        // Initialize Flutter
+        _flutter.loader.loadEntrypoint({
+          serviceWorker: {
+            serviceWorkerVersion: serviceWorkerVersion,
+          },
+          onEntrypointLoaded: async function(engineInitializer) {
+            // Initialize with specific renderer for better video support
+            let appRunner = await engineInitializer.initializeEngine({
+              renderer: flutterWebRenderer,
+              useColorEmoji: true,
+            });
+
+            await appRunner.runApp();
+            document.querySelector('#loading').remove();
+          }
+        });
+      } catch (e) {
+        console.error('Flutter initialization error:', e);
+        // Show error state
+        document.querySelector('#loading').innerHTML = `
+          <div style="text-align: center; color: white;">
+            <p>Failed to load application.</p>
+            <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 20px; background: #8257E5; border: none; color: white; border-radius: 4px; cursor: pointer;">
+              Retry
+            </button>
+          </div>
+        `;
+      }
+    });
+
+    // Prevent zoom on double tap
+    let lastTouchEnd = 0;
+    document.addEventListener('touchend', function(event) {
+      const now = Date.now();
+      if (now - lastTouchEnd <= 300) {
+        event.preventDefault();
+      }
+      lastTouchEnd = now;
+    }, { passive: false });
+
+    // Handle visibility changes
+    document.addEventListener('visibilitychange', function() {
+      if (document.hidden) {
+        // Pause video playback when tab is hidden
+        const videos = document.getElementsByTagName('video');
+        for (let video of videos) {
+          video.pause();
         }
-      });
+      }
     });
   </script>
 </body>

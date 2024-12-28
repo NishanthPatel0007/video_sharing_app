@@ -8,7 +8,6 @@ class R2Service {
   final String workerUrl = 'https://r2.for10cloud.com';
   final String publicUrl = 'https://r2.for10cloud.com';
   final String bucketName = 'cloudfarebuckey2002';
-  final String accountId = '666bfc1258e239123f4ced095cb958e4';
 
   // File size thresholds
   static const int smallFileLimit = 20 * 1024 * 1024;    // 20MB
@@ -17,80 +16,94 @@ class R2Service {
   static const int ultraLargeFileLimit = 400 * 1024 * 1024; // 400MB
 
   // Maximum file sizes
-  static const int maxVideoSize = 500 * 1024 * 1024;     // 500MB
+  static const int maxVideoSize = 500 * 1024 * 1024;     // 500MB for web
+  static const int maxMobileVideoSize = 200 * 1024 * 1024; // 200MB for mobile
   static const int maxThumbnailSize = 5 * 1024 * 1024;   // 5MB
 
-  // Optimized timeout settings for large files
-  Duration getTimeout(int fileSize) {
-    if (fileSize <= smallFileLimit) return const Duration(minutes: 2);      // 2 minutes
-    if (fileSize <= mediumFileLimit) return const Duration(minutes: 5);     // 5 minutes
-    if (fileSize <= largeFileLimit) return const Duration(minutes: 10);     // 10 minutes
-    return const Duration(minutes: 15);                                     // 15 minutes
-  }
-
-  // Optimized chunk sizes
-  int getChunkSize(int fileSize) {
-    if (fileSize <= smallFileLimit) return 2 * 1024 * 1024;      // 2MB chunks
-    if (fileSize <= mediumFileLimit) return 4 * 1024 * 1024;     // 4MB chunks
-    if (fileSize <= largeFileLimit) return 8 * 1024 * 1024;      // 8MB chunks
-    return 10 * 1024 * 1024;                                     // 10MB chunks
-  }
-
-  // Reduced concurrent uploads for stability
-  int getConcurrentUploads(int fileSize) {
-    if (fileSize <= smallFileLimit) return 3;
-    if (fileSize <= mediumFileLimit) return 2;
-    return 1; // Single upload for large files
-  }
-
-  // Enhanced error handling settings
+  // Retry settings
   static const int maxRetries = 5;
   static const Duration retryDelay = Duration(seconds: 10);
 
   // Allowed file types
-  static final List<String> allowedVideoTypes = [
+  static final List<String> _allowedVideoTypes = [
     'video/mp4',
     'video/quicktime',
     'video/x-msvideo',
     'video/x-matroska'
   ];
 
-  static final List<String> allowedImageTypes = [
+  static final List<String> _allowedImageTypes = [
     'image/jpeg',
     'image/png',
     'image/jpg'
   ];
 
+  Duration getTimeout(int fileSize) {
+    if (fileSize <= smallFileLimit) return const Duration(minutes: 2);
+    if (fileSize <= mediumFileLimit) return const Duration(minutes: 5);
+    if (fileSize <= largeFileLimit) return const Duration(minutes: 10);
+    return const Duration(minutes: 15);
+  }
+
+  int getChunkSize(int fileSize, bool isMobile) {
+    if (isMobile) {
+      if (fileSize <= smallFileLimit) return 1 * 1024 * 1024;  // 1MB chunks
+      if (fileSize <= mediumFileLimit) return 2 * 1024 * 1024; // 2MB chunks
+      return 4 * 1024 * 1024;                                  // 4MB chunks
+    } else {
+      if (fileSize <= smallFileLimit) return 2 * 1024 * 1024;  // 2MB chunks
+      if (fileSize <= mediumFileLimit) return 4 * 1024 * 1024; // 4MB chunks
+      if (fileSize <= largeFileLimit) return 8 * 1024 * 1024;  // 8MB chunks
+      return 10 * 1024 * 1024;                                 // 10MB chunks
+    }
+  }
+
+  int getConcurrentUploads(int fileSize, bool isMobile) {
+    if (isMobile) {
+      return fileSize <= mediumFileLimit ? 2 : 1;
+    }
+    if (fileSize <= smallFileLimit) return 3;
+    if (fileSize <= mediumFileLimit) return 2;
+    return 1;
+  }
+
   Future<String> uploadBytes(
     Uint8List bytes,
     String fileName,
     String contentType, {
-    Function(double)? onProgress
+    Function(double)? onProgress,
+    bool isMobile = false,
   }) async {
     try {
       final fileSize = bytes.length;
       print('Starting upload of ${(fileSize / 1024 / 1024).toStringAsFixed(2)}MB file');
 
-      // Validate file size
-      final maxSize = contentType.startsWith('video/') ? maxVideoSize : maxThumbnailSize;
-      if (fileSize > maxSize) {
-        throw Exception('File size exceeds the maximum limit');
-      }
-
       // Validate file type
-      final allowedTypes = contentType.startsWith('video/') ? allowedVideoTypes : allowedImageTypes;
+      final allowedTypes = contentType.startsWith('video/') 
+          ? _allowedVideoTypes 
+          : _allowedImageTypes;
+          
       if (!isValidFileType(contentType, allowedTypes)) {
         throw Exception('Invalid file type: $contentType');
       }
 
-      // Fast path for small files
+      // Check file size limits
+      final maxSize = contentType.startsWith('video/') 
+          ? (isMobile ? maxMobileVideoSize : maxVideoSize) 
+          : maxThumbnailSize;
+          
+      if (fileSize > maxSize) {
+        throw Exception('File size exceeds ${maxSize ~/ (1024 * 1024)}MB limit');
+      }
+
+      // Use fast path for small files
       if (fileSize <= 5 * 1024 * 1024) {
         return _uploadSmallFile(bytes, fileName, contentType, onProgress);
       }
 
-      // Get optimized settings
-      final chunkSize = getChunkSize(fileSize);
-      final maxConcurrent = getConcurrentUploads(fileSize);
+      // Get optimized settings for large files
+      final chunkSize = getChunkSize(fileSize, isMobile);
+      final maxConcurrent = getConcurrentUploads(fileSize, isMobile);
       final timeout = getTimeout(fileSize);
 
       return _uploadLargeFile(
@@ -121,19 +134,12 @@ class R2Service {
     final totalChunks = (bytes.length / chunkSize).ceil();
     var completedChunks = 0;
     final failedChunks = <int>{};
-
-    print('\nUpload configuration:');
-    print('File size: ${(bytes.length / 1024 / 1024).toStringAsFixed(2)}MB');
-    print('Chunk size: ${(chunkSize / 1024 / 1024).toStringAsFixed(2)}MB');
-    print('Total chunks: $totalChunks');
-    print('Concurrent uploads: $maxConcurrent');
-    print('Timeout per chunk: ${timeout.inSeconds}s\n');
-
     final clients = List.generate(maxConcurrent, (_) => http.Client());
 
     try {
-      onProgress?.call(0.01);
+      onProgress?.call(0.01);  // Initial progress
 
+      // Retry logic for failed chunks
       for (var attempt = 0; attempt < maxRetries; attempt++) {
         if (attempt > 0) {
           print('Attempt ${attempt + 1} of $maxRetries');
@@ -142,10 +148,12 @@ class R2Service {
 
         failedChunks.clear();
         
+        // Upload chunks in batches
         for (var i = completedChunks; i < totalChunks;) {
           final batch = <Future<void>>[];
           final batchSize = min(maxConcurrent, totalChunks - i);
 
+          // Create batch of concurrent uploads
           for (var j = 0; j < batchSize; j++) {
             final chunkIndex = i + j;
             final start = chunkIndex * chunkSize;
@@ -174,6 +182,7 @@ class R2Service {
 
           await Future.wait(batch);
           
+          // Handle failed chunks
           if (failedChunks.isEmpty) {
             i += batchSize;
           } else if (attempt < maxRetries - 1) {
@@ -182,19 +191,83 @@ class R2Service {
             await Future.delayed(delay);
             break;
           } else {
-            throw Exception('Failed to upload chunks after multiple retries');
+            throw Exception('Failed to upload chunks after $maxRetries attempts');
           }
         }
 
         if (failedChunks.isEmpty) break;
       }
 
+      // Combine chunks if needed
+      await _combineChunks(
+        fileName,
+        uploadId,
+        contentType,
+        totalChunks,
+        bytes.length,
+      );
+
       print('Upload completed successfully');
       return '$publicUrl/$fileName';
     } finally {
+      // Cleanup
       for (final client in clients) {
         client.close();
       }
+    }
+  }
+
+  Future<void> _combineChunks(
+    String fileName,
+    String uploadId,
+    String contentType,
+    int totalChunks,
+    int totalSize,
+  ) async {
+    final response = await http.post(
+      Uri.parse('$workerUrl/combine'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Upload-Id': uploadId,
+        'X-File-Name': fileName,
+        'X-Content-Type': contentType,
+        'X-Total-Chunks': totalChunks.toString(),
+        'X-Total-Size': totalSize.toString(),
+      },
+    );
+
+    if (response.statusCode != 200) {
+      throw Exception('Failed to combine chunks: ${response.statusCode}');
+    }
+  }
+
+  Future<String> _uploadSmallFile(
+    Uint8List bytes,
+    String fileName,
+    String contentType,
+    Function(double)? onProgress,
+  ) async {
+    final client = http.Client();
+    try {
+      onProgress?.call(0.1);
+      
+      final response = await client.put(
+        Uri.parse('$workerUrl/$fileName'),
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': bytes.length.toString(),
+          'Connection': 'keep-alive',
+        },
+        body: bytes,
+      ).timeout(const Duration(minutes: 2));
+
+      if (response.statusCode == 200) {
+        onProgress?.call(1.0);
+        return '$publicUrl/$fileName';
+      }
+      throw Exception('Upload failed: ${response.statusCode}');
+    } finally {
+      client.close();
     }
   }
 
@@ -229,40 +302,10 @@ class R2Service {
     }
   }
 
-  Future<String> _uploadSmallFile(
-    Uint8List bytes,
-    String fileName,
-    String contentType,
-    Function(double)? onProgress
-  ) async {
+  Future<void> deleteFile(String url) async {
     final client = http.Client();
     try {
-      onProgress?.call(0.1);
-      
-      final response = await client.put(
-        Uri.parse('$workerUrl/$fileName'),
-        headers: {
-          'Content-Type': contentType,
-          'Content-Length': bytes.length.toString(),
-          'Connection': 'keep-alive',
-        },
-        body: bytes,
-      ).timeout(const Duration(minutes: 2));
-
-      if (response.statusCode == 200) {
-        onProgress?.call(1.0);
-        return '$publicUrl/$fileName';
-      }
-      throw Exception('Upload failed: ${response.statusCode}');
-    } finally {
-      client.close();
-    }
-  }
-
-  Future<void> deleteFile(String fileUrl) async {
-    final client = http.Client();
-    try {
-      final uri = Uri.parse(fileUrl);
+      final uri = Uri.parse(url);
       final pathSegments = uri.pathSegments;
       final filePath = pathSegments.join('/');
       

@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,31 +30,37 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
   Uint8List? _thumbnailPreview;
 
   Future<void> _pickVideo() async {
-    setState(() => _isProcessing = true);
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.video,
-        allowMultiple: false,
-        withData: true,
-      );
+  try {
+    // Better file picker configuration
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.video,
+      allowMultiple: false,
+      withData: true,
+      allowCompression: true,  // Added for mobile support
+      onFileLoading: (FilePickerStatus status) {
+        // Show loading status
+      },
+    );
 
-      if (result != null) {
-        if (result.files.first.size > 500 * 1024 * 1024) {
-          _showError('Video file must be less than 500MB');
-          return;
-        }
-
-        setState(() {
-          _videoFile = result.files.first;
-          _selectedVideoName = result.files.first.name;
-        });
+    if (result != null) {
+      // Add mobile-specific size validation
+      final maxSize = kIsWeb ? 500 * 1024 * 1024 : 200 * 1024 * 1024;
+      if (result.files.first.size > maxSize) {
+        _showError(kIsWeb 
+          ? 'Video file must be less than 500MB' 
+          : 'Video file must be less than 200MB on mobile');
+        return;
       }
-    } catch (e) {
-      _showError('Error selecting video: $e');
-    } finally {
-      setState(() => _isProcessing = false);
+
+      setState(() {
+        _videoFile = result.files.first;
+        _selectedVideoName = result.files.first.name;
+      });
     }
+  } catch (e) {
+    _showError('Error selecting video: $e');
   }
+}
 
   void _clearVideo() {
     if (!_isUploading) {
@@ -64,28 +71,34 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
     }
   }
 
-  Future<void> _pickThumbnail() async {
-    setState(() => _isProcessing = true);
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['jpg', 'jpeg', 'png'],
-        withData: true,
-      );
+ Future<void> _pickThumbnail() async {
+  if (_isUploading) return;
 
-      if (result != null) {
-        setState(() {
-          _thumbnailFile = result.files.first;
-          _selectedThumbnailName = result.files.first.name;
-          _thumbnailPreview = result.files.first.bytes;
-        });
+  try {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png'],
+      withData: true,
+      allowCompression: true,  // Added for mobile
+    );
+
+    if (result != null) {
+      // Add size validation
+      if (result.files.first.size > 5 * 1024 * 1024) {
+        _showError('Thumbnail must be less than 5MB');
+        return;
       }
-    } catch (e) {
-      _showError('Error selecting thumbnail: $e');
-    } finally {
-      setState(() => _isProcessing = false);
+
+      setState(() {
+        _thumbnailFile = result.files.first;
+        _selectedThumbnailName = result.files.first.name;
+        _thumbnailPreview = result.files.first.bytes;
+      });
     }
+  } catch (e) {
+    _showError('Error selecting thumbnail: $e');
   }
+}
 
   void _clearThumbnail() {
     if (!_isUploading) {
@@ -152,6 +165,44 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
       }
     }
   }
+  Widget _buildUploadProgress() {
+  return Column(
+    children: [
+      LinearProgressIndicator(
+        value: _uploadProgress,
+        backgroundColor: const Color(0xFF2D2940),
+        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8257E5)),
+      ),
+      const SizedBox(height: 8),
+      Text(
+        _isProcessing 
+          ? 'Processing...' 
+          : 'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
+        style: const TextStyle(
+          color: Colors.white70,
+          fontSize: 12,
+        ),
+      ),
+    ],
+  );
+}
+
+void _showError(String message) {
+  if (!mounted) return;
+  
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(message),
+      backgroundColor: Colors.red.shade700,
+      behavior: SnackBarBehavior.floating,
+      action: SnackBarAction(
+        label: 'Retry',
+        textColor: Colors.white,
+        onPressed: () => _uploadVideo(),
+      ),
+    ),
+  );
+}
 
   void _showSuccessDialog() {
     showDialog(
@@ -239,16 +290,7 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
     );
   }
 
-  void _showError(String message) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red.shade700,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
+ 
 
   String _formatFileSize(int bytes) {
     if (bytes <= 0) return "0 B";
@@ -392,15 +434,20 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
   }
 
   Widget _buildSelectionBox(
-    String label,
-    String? selectedFile,
-    int? fileSize,
-    VoidCallback onSelect,
-    VoidCallback onClear, {
-    bool isVideo = false,
-    Uint8List? preview,
-  }) {
+  String label,
+  String? selectedFile,
+  int? fileSize,
+  VoidCallback onSelect,
+  VoidCallback onClear, {
+  bool isVideo = false,
+  Uint8List? preview,
+}) {
+  final isMobile = MediaQuery.of(context).size.width < 600;
+
+    
     return Container(
+      width: isMobile ? double.infinity : null,
+    padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
         color: const Color(0xFF2D2940),
         borderRadius: BorderRadius.circular(8),
