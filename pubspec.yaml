@@ -30,6 +30,10 @@ dependencies:
   video_compress: ^3.1.2
   path_provider_platform_interface: ^2.1.1
 
+  share_plus: ^7.2.1
+  universal_html: ^2.2.4
+  url_launcher: ^6.2.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

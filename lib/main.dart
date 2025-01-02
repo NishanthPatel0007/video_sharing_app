@@ -47,10 +47,10 @@ class MyApp extends StatelessWidget {
           ),
         ),
         initialRoute: '/',
-        onGenerateRoute: (settings) {
+       onGenerateRoute: (settings) {
           // Handle video share URLs
-          if (settings.name?.startsWith('/v/') ?? false) {
-            final code = settings.name!.substring(3); // Remove '/v/'
+          if (settings.name?.startsWith('/player/') ?? false) {
+            final code = settings.name!.substring(8); // Remove '/player/'
             return MaterialPageRoute(
               builder: (context) => _buildSharedVideoPage(code),
             );
