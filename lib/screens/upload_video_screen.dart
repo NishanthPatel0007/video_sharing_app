@@ -1,9 +1,5 @@
-import 'dart:math';
-
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../services/storage_service.dart';
 
@@ -26,87 +22,51 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
   PlatformFile? _videoFile;
   PlatformFile? _thumbnailFile;
   bool _isProcessing = false;
-  String? _shareUrl;
-  Uint8List? _thumbnailPreview;
 
   Future<void> _pickVideo() async {
-  try {
-    // Better file picker configuration
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-      withData: true,
-      allowCompression: true,  // Added for mobile support
-      onFileLoading: (FilePickerStatus status) {
-        // Show loading status
-      },
-    );
+    setState(() => _isProcessing = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.video,
+        allowMultiple: false,
+        withData: true, // Pre-load the file data
+      );
 
-    if (result != null) {
-      // Add mobile-specific size validation
-      final maxSize = kIsWeb ? 500 * 1024 * 1024 : 200 * 1024 * 1024;
-      if (result.files.first.size > maxSize) {
-        _showError(kIsWeb 
-          ? 'Video file must be less than 500MB' 
-          : 'Video file must be less than 200MB on mobile');
-        return;
+      if (result != null) {
+        if (result.files.first.size > 500 * 1024 * 1024) {
+          _showError('Video file must be less than 500MB');
+          return;
+        }
+
+        setState(() {
+          _videoFile = result.files.first;
+          _selectedVideoName = result.files.first.name;
+        });
       }
-
-      setState(() {
-        _videoFile = result.files.first;
-        _selectedVideoName = result.files.first.name;
-      });
-    }
-  } catch (e) {
-    _showError('Error selecting video: $e');
-  }
-}
-
-  void _clearVideo() {
-    if (!_isUploading) {
-      setState(() {
-        _videoFile = null;
-        _selectedVideoName = null;
-      });
+    } finally {
+      setState(() => _isProcessing = false);
     }
   }
 
- Future<void> _pickThumbnail() async {
-  if (_isUploading) return;
+  Future<void> _pickThumbnail() async {
+    setState(() => _isProcessing = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png'],
+        withData: true,
+      );
 
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png'],
-      withData: true,
-      allowCompression: true,  // Added for mobile
-    );
-
-    if (result != null) {
-      // Add size validation
-      if (result.files.first.size > 5 * 1024 * 1024) {
-        _showError('Thumbnail must be less than 5MB');
-        return;
+      if (result != null) {
+        setState(() {
+          _thumbnailFile = result.files.first;
+          _selectedThumbnailName = result.files.first.name;
+        });
       }
-
-      setState(() {
-        _thumbnailFile = result.files.first;
-        _selectedThumbnailName = result.files.first.name;
-        _thumbnailPreview = result.files.first.bytes;
-      });
-    }
-  } catch (e) {
-    _showError('Error selecting thumbnail: $e');
-  }
-}
-
-  void _clearThumbnail() {
-    if (!_isUploading) {
-      setState(() {
-        _thumbnailFile = null;
-        _selectedThumbnailName = null;
-        _thumbnailPreview = null;
-      });
+    } catch (e) {
+      _showError('Error selecting thumbnail: $e');
+    } finally {
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -123,8 +83,10 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
     });
 
     try {
+      // Show immediate feedback
       setState(() => _uploadProgress = 0.1);
 
+      // Upload thumbnail first (smaller file)
       final thumbnailUrl = await _storage.uploadToR2(
         _thumbnailFile!.bytes!,
         'thumbnails/${DateTime.now().millisecondsSinceEpoch}_${_thumbnailFile!.name}',
@@ -133,20 +95,22 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
 
       setState(() => _uploadProgress = 0.2);
 
+      // Upload video with progress
       final videoUrl = await _storage.uploadToR2(
         _videoFile!.bytes!,
         'videos/${DateTime.now().millisecondsSinceEpoch}_${_videoFile!.name}',
         'video/mp4',
         onProgress: (progress) {
           setState(() {
+            // Scale progress from 20% to 90%
             _uploadProgress = 0.2 + (progress * 0.7);
           });
         },
       );
 
+      // Save metadata
       setState(() => _uploadProgress = 0.9);
-      
-      _shareUrl = await _storage.saveVideoMetadata(
+      await _storage.saveVideoMetadata(
         title: _titleController.text,
         videoUrl: videoUrl,
         thumbnailUrl: thumbnailUrl,
@@ -155,7 +119,10 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
       setState(() => _uploadProgress = 1.0);
 
       if (mounted) {
-        _showSuccessDialog();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Video uploaded successfully!')),
+        );
+        Navigator.pop(context, true);
       }
     } catch (e) {
       _showError('Upload failed: $e');
@@ -165,413 +132,127 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
       }
     }
   }
-  Widget _buildUploadProgress() {
-  return Column(
-    children: [
-      LinearProgressIndicator(
-        value: _uploadProgress,
-        backgroundColor: const Color(0xFF2D2940),
-        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8257E5)),
-      ),
-      const SizedBox(height: 8),
-      Text(
-        _isProcessing 
-          ? 'Processing...' 
-          : 'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
-        style: const TextStyle(
-          color: Colors.white70,
-          fontSize: 12,
-        ),
-      ),
-    ],
-  );
-}
 
-void _showError(String message) {
-  if (!mounted) return;
-  
-  ScaffoldMessenger.of(context).showSnackBar(
-    SnackBar(
-      content: Text(message),
-      backgroundColor: Colors.red.shade700,
-      behavior: SnackBarBehavior.floating,
-      action: SnackBarAction(
-        label: 'Retry',
-        textColor: Colors.white,
-        onPressed: () => _uploadVideo(),
-      ),
-    ),
-  );
-}
-
-  void _showSuccessDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1633),
-        title: const Text(
-          'Upload Successful',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Your video share URL:',
-              style: TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2D2940),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF8257E5)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  SelectableText(
-                    _shareUrl != null 
-                        ? 'https://for10cloud.com/v/${_shareUrl!.split('/').last}'
-                        : 'https://for10cloud.com/v/...',
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 14,
-                      color: Colors.white,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  if (_shareUrl != null) ...[
-                    const SizedBox(height: 8),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              if (_shareUrl != null) {
-                final url = 'https://for10cloud.com/v/${_shareUrl!.split('/').last}';
-                await Clipboard.setData(ClipboardData(text: url));
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('URL copied to clipboard!'),
-                      behavior: SnackBarBehavior.floating,
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                }
-              }
-            },
-            style: TextButton.styleFrom(
-              foregroundColor: Colors.white70,
-            ),
-            child: const Text('Copy URL'),
-          ),
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context, true);
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: const Color(0xFF8257E5),
-            ),
-            child: const Text('Done'),
-          ),
-        ],
+  void _showError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
       ),
     );
-  }
-
- 
-
-  String _formatFileSize(int bytes) {
-    if (bytes <= 0) return "0 B";
-    const suffixes = ["B", "KB", "MB", "GB"];
-    var i = (log(bytes) / log(1024)).floor();
-    return '${(bytes / pow(1024, i)).toStringAsFixed(1)} ${suffixes[i]}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF1E1B2C),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF2D2940),
-        elevation: 0,
-        title: const Text(
-          'Upload New Video',
-          style: TextStyle(color: Colors.white),
-        ),
+        title: const Text('Upload New Video'),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back),
           onPressed: _isUploading ? null : () => Navigator.pop(context),
         ),
       ),
-      body: SingleChildScrollView(
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextFormField(
-                  controller: _titleController,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    hintText: 'Video Title',
-                    hintStyle: const TextStyle(color: Colors.white54),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFF8257E5)),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Colors.white24),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      borderSide: const BorderSide(color: Color(0xFF8257E5)),
-                    ),
-                    filled: true,
-                    fillColor: const Color(0xFF2D2940),
-                  ),
-                  validator: (value) =>
-                      value?.isEmpty ?? true ? 'Please enter a title' : null,
-                  enabled: !_isUploading,
+      body: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _titleController,
+                decoration: const InputDecoration(
+                  labelText: 'Video Title',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.title),
                 ),
-                
-                const SizedBox(height: 24),
-                
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: AspectRatio(
-                        aspectRatio: 70/78,
-                        child: _buildSelectionBox(
-                          'Select Video',
-                          _selectedVideoName,
-                          _videoFile?.size,
-                          _pickVideo,
-                          _clearVideo,
-                          isVideo: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: AspectRatio(
-                        aspectRatio: 70/78,
-                        child: _buildSelectionBox(
-                          'Select Thumbnail',
-                          _selectedThumbnailName,
-                          _thumbnailFile?.size,
-                          _pickThumbnail,
-                          _clearThumbnail,
-                          preview: _thumbnailPreview,
-                          isVideo: false,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                
-                const SizedBox(height: 24),
-                
-                if (_isUploading || _isProcessing) ...[
-                  LinearProgressIndicator(
-                    value: _uploadProgress,
-                    backgroundColor: const Color(0xFF2D2940),
-                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF8257E5)),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _isProcessing 
-                      ? 'Processing...' 
-                      : 'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ],
+                validator: (value) =>
+                    value?.isEmpty ?? true ? 'Please enter a title' : null,
+                enabled: !_isUploading,
+              ),
+              const SizedBox(height: 24),
 
-                FilledButton(
-                  onPressed: (_isUploading || _isProcessing) ? null : _uploadVideo,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: const Color(0xFF8257E5),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                  child: Text(
-                    _isUploading ? 'Uploading...' : 'Upload Video',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.white,
-                    ),
-                  ),
+              // File Selection Cards
+              _buildFileCard(
+                'Video File',
+                _selectedVideoName,
+                Icons.video_library,
+                _isUploading ? null : _pickVideo,
+              ),
+              const SizedBox(height: 16),
+              _buildFileCard(
+                'Thumbnail',
+                _selectedThumbnailName,
+                Icons.image,
+                _isUploading ? null : _pickThumbnail,
+              ),
+
+              const SizedBox(height: 24),
+
+              if (_isUploading || _isProcessing) ...[
+                LinearProgressIndicator(value: _uploadProgress),
+                const SizedBox(height: 8),
+                Text(
+                  _isProcessing 
+                    ? 'Processing...' 
+                    : 'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
+                const SizedBox(height: 24),
               ],
-            ),
+
+              ElevatedButton.icon(
+                onPressed: (_isUploading || _isProcessing) ? null : _uploadVideo,
+                icon: const Icon(Icons.cloud_upload),
+                label: Text(_isUploading ? 'Uploading...' : 'Upload Video'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  textStyle: const TextStyle(fontSize: 18),
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildSelectionBox(
-  String label,
-  String? selectedFile,
-  int? fileSize,
-  VoidCallback onSelect,
-  VoidCallback onClear, {
-  bool isVideo = false,
-  Uint8List? preview,
-}) {
-  final isMobile = MediaQuery.of(context).size.width < 600;
-
-    
-    return Container(
-      width: isMobile ? double.infinity : null,
-    padding: EdgeInsets.all(isMobile ? 12 : 16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF2D2940),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF8257E5), width: 1),
-      ),
-      child: Stack(
-        children: [
-          if (selectedFile != null)
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (isVideo)
-                    Container(
-                      color: Colors.black87,
-                      child: const Center(
-                        child: Icon(
-                          Icons.play_circle_outline,
-                          size: 40,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    )
-                  else if (preview != null)
-                    Image.memory(
-                      preview,
-                      fit: BoxFit.cover,
-                    )
-                  else
-                    Container(
-                      color: const Color(0xFF1E1633),
-                      child: const Center(
-                        child: Icon(
-                          Icons.image,
-                          size: 40,
-                          color: Colors.white70,
-                        ),
-                      ),
-                    ),
-
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withOpacity(0.7),
-                          Colors.transparent,
-                          Colors.transparent,
-                          Colors.black.withOpacity(0.7),
-                        ],
-                        stops: const [0.0, 0.2, 0.8, 1.0],
-                        ),
-                    ),
-                  ),
-
-                  Positioned(
-                    bottom: 8,
-                    left: 8,
-                    right: 8,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          selectedFile,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (fileSize != null)
-                          Text(
-                            _formatFileSize(fileSize),
-                            style: TextStyle(
-                              color: Colors.white.withOpacity(0.8),
-                              fontSize: 10,
-                            ),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else
-            Center(
-              child: FilledButton(
-                onPressed: onSelect,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF8257E5),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                child: Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Colors.white,
-                  ),
-                ),
+  Widget _buildFileCard(
+    String title, 
+    String? selectedFileName, 
+    IconData icon,
+    VoidCallback? onSelect,
+  ) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-          
-          if (selectedFile != null)
-            Positioned(
-              right: 4,
-              top: 4,
-              child: IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                onPressed: onClear,
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.black54,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.all(4),
-                ),
+            const SizedBox(height: 8),
+            Text(
+              selectedFileName ?? 'No file selected',
+              style: TextStyle(
+                color: selectedFileName != null ? Colors.green : Colors.grey,
               ),
             ),
-        ],
+            const SizedBox(height: 16),
+            ElevatedButton.icon(
+              onPressed: onSelect,
+              icon: Icon(icon),
+              label: Text('Select $title'),
+            ),
+          ],
+        ),
       ),
     );
   }

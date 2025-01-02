@@ -1,39 +1,26 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base href="/">
+  <base href="$FLUTTER_BASE_HREF">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="For10Cloud">
-  <meta property="og:title" content="For10Cloud Video">
-  <meta property="og:description" content="Cloud Storage WebApplication">
-  <meta property="og:image" content="/thumbnail.png">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  
-  <!-- PWA meta tags -->
+  <meta name="description" content="A video sharing application">
+  <title>Video Sharing App</title>
+
+  <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="Video Sharing">
-  <meta name="mobile-web-app-capable" content="yes">
-  <link rel="canonical" href="https://for10cloud.com">
-
-  <!-- Video playback support -->
-  <meta name="video-playsinline" content="true">
-  <meta name="playsinline" content="true">
-
-  <!-- CORS and Security Headers -->
-  <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
-  <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-
-  <title>Video Sharing App</title>
+  <meta name="apple-mobile-web-app-title" content="video_sharing_app_new">
+  
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png">
 
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-firestore-compat.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/path-provider/path_provider.js"></script>
   
-  <!-- Firebase Configuration -->
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyDC2U3n6TFc0QIlAp6e64PJjVnPYhdb8qI",
@@ -47,172 +34,62 @@
     firebase.initializeApp(firebaseConfig);
   </script>
 
-  <!-- Flutter initialization -->
   <script>
+    // The value below is injected by flutter build, do not touch.
     var serviceWorkerVersion = null;
-
-    // Platform detection
-    window.isMobileBrowser = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-    window.isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
-    window.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-
-    // Clipboard API support check
-    window.hasClipboardAPI = navigator.clipboard && navigator.clipboard.writeText;
-
-    // Add error handling for video player
-    window.addEventListener('error', function(e) {
-      if (e.target.tagName === 'VIDEO') {
-        console.error('Video error:', e);
-        e.target.load(); // Attempt to reload the video
-      }
-    }, true);
-
-    // Prevent iOS video fullscreen issues
-    document.addEventListener('webkitfullscreenchange', function() {
-      if (document.webkitFullscreenElement === null) {
-        const videos = document.getElementsByTagName('video');
-        for (let video of videos) {
-          video.style.width = '100%';
-          video.style.height = 'auto';
-        }
-      }
-    });
   </script>
-
   <script src="flutter.js" defer></script>
-
-  <style>
-    /* Loading animation */
-    .loading {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      width: 100vw;
-      position: fixed;
-      background: #1E1B2C;
-      z-index: 999;
-    }
-    .loader {
-      width: 48px;
-      height: 48px;
-      border: 5px solid #2A2141;
-      border-bottom-color: #8257E5;
-      border-radius: 50%;
-      display: inline-block;
-      box-sizing: border-box;
-      animation: rotation 1s linear infinite;
-    }
-    @keyframes rotation {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    /* Mobile optimizations */
-    @media (max-width: 768px) {
-      body {
-        overscroll-behavior-y: none;
-        -webkit-tap-highlight-color: transparent;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        user-select: none;
-      }
-
-      video::-webkit-media-controls {
-        display: none !important;
-      }
-
-      video::-webkit-media-controls-enclosure {
-        display: none !important;
-      }
-    }
-
-    /* Prevent text selection on buttons */
-    button {
-      -webkit-touch-callout: none;
-      -webkit-user-select: none;
-      user-select: none;
-    }
-
-    /* Hide native video controls */
-    video::-webkit-media-controls {
-      display: none !important;
-    }
-
-    /* Fix Safari video playback */
-    video {
-      object-fit: contain;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* Improve mobile touch targets */
-    input, button {
-      min-height: 44px;
-      min-width: 44px;
-    }
-  </style>
 </head>
 <body>
-  <div id="loading" class="loading">
-    <div class="loader"></div>
-  </div>
-
   <script>
-    window.addEventListener('load', async function() {
-      try {
-        const flutterWebRenderer = 'html';
-
-        // Initialize Flutter
-        _flutter.loader.loadEntrypoint({
-          serviceWorker: {
-            serviceWorkerVersion: serviceWorkerVersion,
-          },
-          onEntrypointLoaded: async function(engineInitializer) {
-            // Initialize with specific renderer for better video support
-            let appRunner = await engineInitializer.initializeEngine({
-              renderer: flutterWebRenderer,
-              useColorEmoji: true,
-            });
-
-            await appRunner.runApp();
-            document.querySelector('#loading').remove();
-          }
-        });
-      } catch (e) {
-        console.error('Flutter initialization error:', e);
-        // Show error state
-        document.querySelector('#loading').innerHTML = `
-          <div style="text-align: center; color: white;">
-            <p>Failed to load application.</p>
-            <button onclick="location.reload()" style="padding: 10px 20px; margin-top: 20px; background: #8257E5; border: none; color: white; border-radius: 4px; cursor: pointer;">
-              Retry
-            </button>
-          </div>
-        `;
-      }
-    });
-
-    // Prevent zoom on double tap
-    let lastTouchEnd = 0;
-    document.addEventListener('touchend', function(event) {
-      const now = Date.now();
-      if (now - lastTouchEnd <= 300) {
-        event.preventDefault();
-      }
-      lastTouchEnd = now;
-    }, { passive: false });
-
-    // Handle visibility changes
-    document.addEventListener('visibilitychange', function() {
-      if (document.hidden) {
-        // Pause video playback when tab is hidden
-        const videos = document.getElementsByTagName('video');
-        for (let video of videos) {
-          video.pause();
+    window.addEventListener('load', function(ev) {
+      // Download main.dart.js
+      _flutter.loader.loadEntrypoint({
+        serviceWorker: {
+          serviceWorkerVersion: serviceWorkerVersion,
+        },
+        onEntrypointLoaded: function(engineInitializer) {
+          engineInitializer.initializeEngine().then(function(appRunner) {
+            appRunner.runApp();
+          });
         }
-      }
+      });
     });
   </script>
+  <div id="loading">
+    <style>
+      body {
+        inset: 0;
+        overflow: hidden;
+        margin: 0;
+        padding: 0;
+        position: fixed;
+      }
+      #loading {
+        align-items: center;
+        display: flex;
+        height: 100%;
+        justify-content: center;
+        width: 100%;
+      }
+      #loading img {
+        animation: 1s ease-in-out 0s infinite alternate breathe;
+        opacity: .66;
+        transition: opacity .4s;
+      }
+      #loading.main_done img {
+        opacity: 1;
+      }
+      @keyframes breathe {
+        from {
+          transform: scale(1)
+        }
+        to {
+          transform: scale(0.95)
+        }
+      }
+    </style>
+    <img src="icons/Icon-192.png" alt="Loading indicator..." />
+  </div>
 </body>
 </html>

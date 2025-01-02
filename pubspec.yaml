@@ -12,12 +12,12 @@ dependencies:
   firebase_core: 2.15.1
   firebase_auth: 4.9.0
   cloud_firestore: 4.9.1
-  video_thumbnail: ^0.5.3
   provider: ^6.1.1
   video_player: ^2.8.1
   file_picker: ^6.1.1
   http: ^1.1.0
-  crypto: ^3.0.0   
+  crypto: ^3.0.0
+  
   #cludeflare r2 SDK
   amazon_cognito_identity_dart_2: ^3.5.0 
   aws_s3_api: ^2.0.0
