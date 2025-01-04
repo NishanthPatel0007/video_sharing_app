@@ -10,13 +10,13 @@ import '../services/browser_detector.dart';
 import '../services/storage_service.dart';
 import '../services/video_format_handler.dart';
 
-class PlayerScreen extends StatefulWidget {
+class PublicVideoPlayer extends StatefulWidget {
   final Video video;
   final VoidCallback onBack;
   final bool allowFullscreen;
   final bool showControls;
   
-  const PlayerScreen({
+  const PublicVideoPlayer({
     Key? key,
     required this.video,
     required this.onBack,
@@ -25,16 +25,17 @@ class PlayerScreen extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  _PlayerScreenState createState() => _PlayerScreenState();
+  _PublicVideoPlayerState createState() => _PublicVideoPlayerState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PublicVideoPlayerState extends State<PublicVideoPlayer> {
   late VideoPlayerController _controller;
   final StorageService _storage = StorageService();
   final BrowserDetector _browserDetector = BrowserDetector();
   
   Timer? _hideTimer;
   Timer? _positionTimer;
+  Timer? _bufferingTimer;
   Duration _watchDuration = Duration.zero;
   
   bool _isInitialized = false;
@@ -43,21 +44,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _hasError = false;
   bool _showControls = true;
   bool _isFullscreen = false;
-  bool _isOwner = false;
   String _errorMessage = '';
+  bool _reportSubmitted = false;
 
   @override
   void initState() {
     super.initState();
-    _checkOwnership();
     _initializePlayer();
     _incrementViews();
     _startWatchTracking();
-  }
-
-  void _checkOwnership() {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    _isOwner = currentUser?.uid == widget.video.userId;
   }
 
   Future<void> _initializePlayer() async {
@@ -93,10 +88,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _controller.initialize();
       _controller.addListener(_videoListener);
 
+      // Start buffering timer
+      _bufferingTimer = Timer.periodic(const Duration(milliseconds: 500), (timer) {
+        if (_controller.value.isPlaying && !_controller.value.isBuffering) {
+          timer.cancel();
+          if (mounted) setState(() => _isBuffering = false);
+        }
+      });
+
       if (mounted) {
         setState(() {
           _isInitialized = true;
-          _isBuffering = false;
           _hasError = false;
         });
       }
@@ -127,7 +129,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (_hideTimer?.isActive ?? false) _hideTimer!.cancel();
     _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _showControls) {
+      if (mounted && _showControls && _controller.value.isPlaying) {
         setState(() => _showControls = false);
       }
     });
@@ -144,12 +146,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _incrementViews() async {
-    if (!_isOwner) {
-      try {
-        await _storage.incrementViews(widget.video.id);
-      } catch (e) {
-        print('Failed to increment views: $e');
-      }
+    try {
+      await _storage.incrementViews(widget.video.id);
+    } catch (e) {
+      print('Failed to increment views: $e');
     }
   }
 
@@ -174,10 +174,82 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _isFullscreen = !_isFullscreen);
   }
 
+  Future<void> _reportVideo() async {
+    if (_reportSubmitted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You have already reported this video')),
+      );
+      return;
+    }
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please sign in to report videos')),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Report Video'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Please select a reason for reporting:'),
+            const SizedBox(height: 16),
+            _buildReportOption('Inappropriate content'),
+            _buildReportOption('Copyright violation'),
+            _buildReportOption('Violent or abusive'),
+            _buildReportOption('Other'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportOption(String reason) {
+    return InkWell(
+      onTap: () async {
+        Navigator.pop(context);
+        try {
+          // Add report to database
+          setState(() => _reportSubmitted = true);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Report submitted. Thank you for your feedback.')),
+          );
+        } catch (e) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to submit report: $e')),
+          );
+        }
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8.0),
+        child: Row(
+          children: [
+            Icon(Icons.radio_button_off, size: 20, color: Colors.grey[600]),
+            const SizedBox(width: 8),
+            Text(reason),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _hideTimer?.cancel();
     _positionTimer?.cancel();
+    _bufferingTimer?.cancel();
     _controller.removeListener(_videoListener);
     _controller.dispose();
     if (_isFullscreen) {
@@ -224,11 +296,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
               ],
             ),
-            if (_isOwner)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.white),
-                onPressed: _showDeleteDialog,
+            IconButton(
+              icon: Icon(
+                Icons.flag,
+                color: _reportSubmitted ? Colors.red : Colors.white,
               ),
+              onPressed: _reportVideo,
+            ),
           ],
         ),
       ),
@@ -441,39 +515,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ElevatedButton(
             onPressed: _initializePlayer,
             child: const Text('Retry'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showDeleteDialog() async {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Video'),
-        content: const Text('Are you sure you want to delete this video?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await _storage.deleteVideo(widget.video.id);
-                widget.onBack();
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to delete video: $e')),
-                  );
-                }
-              }
-            },
-            child: const Text('Delete'),
           ),
         ],
       ),

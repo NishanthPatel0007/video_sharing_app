@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../models/video.dart';
@@ -42,7 +41,7 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
             onPressed: () {
               Navigator.pop(context);
               widget.onDelete();
-              Navigator.pop(context); // Return to dashboard
+              Navigator.pop(context);
             },
             style: TextButton.styleFrom(foregroundColor: Colors.red),
             child: const Text('Delete'),
@@ -75,12 +74,11 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
       appBar: AppBar(
         title: const Text('Video Details'),
         actions: [
-          if (FirebaseAuth.instance.currentUser?.uid == widget.video.userId)
-            IconButton(
-              icon: const Icon(Icons.delete),
-              onPressed: () => _confirmDelete(context),
-              tooltip: 'Delete Video',
-            ),
+          IconButton(
+            icon: const Icon(Icons.delete),
+            onPressed: () => _confirmDelete(context),
+            tooltip: 'Delete Video',
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -95,7 +93,10 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => PlayerScreen(video: widget.video),
+                      builder: (context) => PlayerScreen(
+                        video: widget.video,
+                        onBack: () => Navigator.pop(context), // Fixed: Added onBack
+                      ),
                     ),
                   );
                 },
@@ -165,41 +166,11 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const SizedBox(height: 8),
-
-                  // Uploader info
-                  Row(
-                    children: [
-                      CircleAvatar(
-                        backgroundColor: Theme.of(context).primaryColor,
-                        child: Text(
-                          (widget.video.userEmail ?? 'U')[0].toUpperCase(),
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.video.userEmail ?? 'Unknown User',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const Text('Uploader'),
-                        ],
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
 
-            // Share Widget
+            // Share Section
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16.0),
               child: Container(
@@ -207,39 +178,9 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                 decoration: BoxDecoration(
                   color: Colors.grey[100],
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
                 ),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text(
-                      'COPY TO CLIPBOARD',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.grey[300]!),
-                      ),
-                      child: Text(
-                        'for10cloud.com/v/...',
-                        style: TextStyle(color: Colors.grey[600]),
-                        textAlign: TextAlign.center,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
                     ElevatedButton(
                       onPressed: _isGeneratingUrl
                           ? null
@@ -251,37 +192,18 @@ class _VideoDetailsScreenState extends State<VideoDetailsScreen> {
                               );
                               setState(() => _isGeneratingUrl = false);
                             },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
                       child: _isGeneratingUrl
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
+                              child: CircularProgressIndicator(),
                             )
-                          : const Text(
-                              'Copy',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
+                          : const Text('Copy Share Link'),
                     ),
                   ],
                 ),
               ),
             ),
-            const SizedBox(height: 24),
           ],
         ),
       ),

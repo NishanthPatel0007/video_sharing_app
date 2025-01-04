@@ -65,21 +65,25 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _login() async {
-    if (_formKey.currentState?.validate() ?? false) {
-      setState(() => _isLoading = true);
-      try {
-        final error = await context.read<AuthService>().login(
-              _emailController.text,
-              _passwordController.text,
-            );
-        if (error != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(error)),
-          );
-        }
-      } finally {
-        if (mounted) setState(() => _isLoading = false);
+  if (_formKey.currentState?.validate() ?? false) {
+    setState(() => _isLoading = true);
+    try {
+      final error = await context.read<AuthService>().login(
+        _emailController.text,
+        _passwordController.text,
+      );
+      
+      if (error != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error)),
+        );
+      } else if (mounted) {
+        // Successful login - navigate to dashboard
+        Navigator.pushReplacementNamed(context, '/dashboard');
       }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
+}
 }
