@@ -105,7 +105,7 @@ class LandingScreen extends StatelessWidget {
           Container(
             constraints: const BoxConstraints(maxWidth: 600),
             child: const Text(
-              'Upload, share, and manage your videos with ease. Get instant shareable links and reach your audience quickly.',
+              'Upload, share, and manage your videos with ease.Earn More than 1L+ Rs Every Month.',
               style: TextStyle(
                 fontSize: 20,
                 color: Colors.white70,
@@ -221,8 +221,8 @@ class LandingScreen extends StatelessWidget {
         Expanded(
           child: _buildFeatureCard(
             icon: Icons.video_library,
-            title: 'Video Management',
-            description: 'Manage all your videos from a simple dashboard interface.',
+            title: 'Video Management & Earn',
+            description: 'Manage all your videos from a simple dashboard interface and Keep Track how much Money Did you Earn.',
           ),
         ),
       ],
