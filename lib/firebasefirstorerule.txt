@@ -1,0 +1,92 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidVideo() {
+      let data = request.resource.data;
+      return 
+        data.title is string &&
+        data.title.size() > 0 &&
+        data.videoUrl is string &&
+        data.thumbnailUrl is string &&
+        data.userId is string &&
+        (data.userEmail == request.auth.token.email || data.userEmail == null) &&
+        data.views is number &&
+        data.views >= 0;
+    }
+
+    function isValidUrl() {
+      let data = request.resource.data;
+      return 
+        data.videoId is string &&
+        data.shortCode is string &&
+        data.shortCode.size() == 6 &&
+        data.visits is number &&
+        data.visits >= 0 &&
+        data.isActive is bool;
+    }
+
+    // Videos collection rules
+    match /videos/{videoId} {
+      // Anyone can read videos for public viewing
+      allow read: if true;
+      
+      // Only authenticated users can create videos
+      allow create: if isSignedIn() 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.userEmail == request.auth.token.email
+        && isValidVideo();
+      
+      // Only video owners can update or delete
+      allow update: if isOwner(resource.data.userId)
+        && request.resource.data.userId == resource.data.userId;
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // Video URLs collection rules
+    match /video_urls/{urlId} {
+      // Anyone can read URLs for video sharing
+      allow read: if true;
+      
+      // Only authenticated users who own the video can create URLs
+      allow create: if isSignedIn() 
+        && exists(/databases/$(database)/documents/videos/$(request.resource.data.videoId))
+        && get(/databases/$(database)/documents/videos/$(request.resource.data.videoId)).data.userId == request.auth.uid
+        && isValidUrl();
+      
+      // Allow updates only for visit counter and last accessed
+      allow update: if true
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['visits', 'lastAccessed']);
+      
+      // Only video owners can delete URLs
+      allow delete: if isSignedIn() 
+        && exists(/databases/$(database)/documents/videos/$(resource.data.videoId))
+        && get(/databases/$(database)/documents/videos/$(resource.data.videoId)).data.userId == request.auth.uid;
+    }
+
+    // User profiles collection (if needed)
+    match /users/{userId} {
+      allow read: if true;
+      allow write: if isOwner(userId);
+    }
+
+    // Analytics collection (if needed)
+    match /analytics/{docId} {
+      allow read: if isSignedIn();
+      allow write: if false;  // Only allow writes from backend
+    }
+
+    // Default deny all other collections
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,479 +1,400 @@
 import 'dart:async';
 
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../models/video.dart';
-import '../services/browser_detector.dart';
 import '../services/storage_service.dart';
-import '../services/video_format_handler.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Video video;
-  final VoidCallback onBack;
-  final bool allowFullscreen;
-  final bool showControls;
+  final bool autoPlay;  // New parameter for auto-play
   
   const PlayerScreen({
-    Key? key,
-    required this.video,
-    required this.onBack,
-    this.allowFullscreen = true,
-    this.showControls = true,
+    Key? key, 
+    required this.video, 
+    this.autoPlay = true,  // Default to true
   }) : super(key: key);
 
   @override
   _PlayerScreenState createState() => _PlayerScreenState();
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderStateMixin {
   late VideoPlayerController _controller;
-  final StorageService _storage = StorageService();
-  final BrowserDetector _browserDetector = BrowserDetector();
-  
-  Timer? _hideTimer;
-  Timer? _positionTimer;
-  Duration _watchDuration = Duration.zero;
-  
   bool _isInitialized = false;
-  bool _isPlaying = false;
   bool _isBuffering = false;
+  bool _isFullScreen = false;
   bool _hasError = false;
-  bool _showControls = true;
-  bool _isFullscreen = false;
-  bool _isOwner = false;
   String _errorMessage = '';
+  final StorageService _storage = StorageService();
+  late AnimationController _fadeController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    _checkOwnership();
-    _initializePlayer();
+    _fadeController = AnimationController(
+      duration: const Duration(milliseconds: 500),
+      vsync: this,
+    );
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(_fadeController);
+    _initializeVideo();
     _incrementViews();
-    _startWatchTracking();
   }
 
-  void _checkOwnership() {
-    final currentUser = FirebaseAuth.instance.currentUser;
-    _isOwner = currentUser?.uid == widget.video.userId;
-  }
-
-  Future<void> _initializePlayer() async {
+  Future<void> _initializeVideo() async {
     setState(() => _isBuffering = true);
-
     try {
-      final capabilities = _browserDetector.getBrowserCapabilities();
-      final playbackConfig = VideoFormatHandler.getPlaybackConfig(
-        isIOS: capabilities['platform'] == 'iOS',
-        isWeb: capabilities['platform'] == 'Web',
-        fileSize: widget.video.metadata?['filesize'] ?? 0,
-      );
-
-      final videoUrl = VideoFormatHandler.getAppropriateVideoUrl(
-        defaultUrl: widget.video.videoUrl,
-        hlsUrl: widget.video.hlsUrl,
-      );
-
       _controller = VideoPlayerController.network(
-        videoUrl,
-        videoPlayerOptions: VideoPlayerOptions(
-          mixWithOthers: false,
-          allowBackgroundPlayback: false,
-        ),
+        widget.video.videoUrl,
         httpHeaders: {
           'Accept-Ranges': 'bytes',
           'Access-Control-Allow-Origin': '*',
-          'X-Platform-Info': capabilities['platform'],
-          'X-Video-Format': playbackConfig['preferredCodec'],
         },
       );
 
       await _controller.initialize();
       _controller.addListener(_videoListener);
-
+      
       if (mounted) {
         setState(() {
           _isInitialized = true;
           _isBuffering = false;
           _hasError = false;
         });
+        
+        // Start fade-in animation
+        _fadeController.forward();
+        
+        // Auto-play if enabled
+        if (widget.autoPlay) {
+          _controller.play();
+        }
       }
     } catch (e) {
       print('Video initialization error: $e');
       if (mounted) {
         setState(() {
+          _isBuffering = false;
           _hasError = true;
           _errorMessage = e.toString();
-          _isBuffering = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error loading video: $e'),
+            backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: _initializeVideo,
+            ),
+          ),
+        );
       }
     }
   }
 
   void _videoListener() {
-    if (_controller.value.hasError) {
-      setState(() {
-        _hasError = true;
-        _errorMessage = 'Video playback error';
-      });
-    }
-    
     final isBuffering = _controller.value.isBuffering;
     if (_isBuffering != isBuffering && mounted) {
       setState(() => _isBuffering = isBuffering);
     }
-
-    if (_hideTimer?.isActive ?? false) _hideTimer!.cancel();
-    _hideTimer = Timer(const Duration(seconds: 3), () {
-      if (mounted && _showControls) {
-        setState(() => _showControls = false);
-      }
-    });
-  }
-
-  void _startWatchTracking() {
-    _positionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_controller.value.isPlaying) {
-        setState(() {
-          _watchDuration += const Duration(seconds: 1);
-        });
-      }
-    });
   }
 
   Future<void> _incrementViews() async {
-    if (!_isOwner) {
-      try {
-        await _storage.incrementViews(widget.video.id);
-      } catch (e) {
-        print('Failed to increment views: $e');
-      }
+    try {
+      await _storage.incrementViews(widget.video.id);
+    } catch (e) {
+      print('Failed to increment views: $e');
     }
   }
 
-  void _togglePlay() {
-    setState(() {
-      _isPlaying = !_isPlaying;
-      _isPlaying ? _controller.play() : _controller.pause();
-    });
-  }
-
-  void _toggleFullscreen() async {
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    } else {
-      SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    }
-    setState(() => _isFullscreen = !_isFullscreen);
+  void _toggleFullScreen() {
+    setState(() => _isFullScreen = !_isFullScreen);
   }
 
   @override
   void dispose() {
-    _hideTimer?.cancel();
-    _positionTimer?.cancel();
     _controller.removeListener(_videoListener);
     _controller.dispose();
-    if (_isFullscreen) {
-      SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    }
+    _fadeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: _isFullscreen
-          ? _buildPlayerWidget()
-          : Column(
-              children: [
-                _buildHeader(),
-                Expanded(child: _buildPlayerWidget()),
-                if (!_isFullscreen) _buildVideoInfo(),
-              ],
-            ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Colors.grey)),
-      ),
-      child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.arrow_back, size: 20, color: Colors.white),
-                  onPressed: widget.onBack,
-                ),
-                const Text(
-                  'Back',
-                  style: TextStyle(fontSize: 12, color: Colors.white),
-                ),
-              ],
-            ),
-            if (_isOwner)
-              IconButton(
-                icon: const Icon(Icons.delete, color: Colors.white),
-                onPressed: _showDeleteDialog,
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPlayerWidget() {
-    return GestureDetector(
-      onTap: () => setState(() => _showControls = !_showControls),
-      child: Stack(
-        fit: StackFit.expand,
-        children: [
-          _isInitialized
-              ? Center(
-                  child: AspectRatio(
-                    aspectRatio: _controller.value.aspectRatio,
-                    child: VideoPlayer(_controller),
-                  ),
-                )
-              : Image.network(
-                  widget.video.thumbnailUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      color: Colors.black,
-                      child: const Icon(Icons.error, color: Colors.white),
-                    );
-                  },
-                ),
-
-          if (_showControls && widget.showControls)
-            _buildControls(),
-
-          if (_isBuffering)
-            const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-
-          if (_hasError)
-            _buildErrorDisplay(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildControls() {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withOpacity(0.7),
-            Colors.transparent,
-            Colors.black.withOpacity(0.7),
-          ],
-          stops: const [0.0, 0.5, 1.0],
-        ),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _buildTopControls(),
-          _buildBottomControls(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTopControls() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              widget.video.title,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          if (widget.allowFullscreen)
+    return WillPopScope(
+      onWillPop: () async {
+        if (_isFullScreen) {
+          _toggleFullScreen();
+          return false;
+        }
+        return true;
+      },
+      child: Scaffold(
+        appBar: _isFullScreen ? null : AppBar(
+          title: Text(widget.video.title),
+          actions: [
             IconButton(
-              icon: Icon(
-                _isFullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                color: Colors.white,
-              ),
-              onPressed: _toggleFullscreen,
+              icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+              onPressed: _toggleFullScreen,
             ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBottomControls() {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (_isInitialized)
-          VideoProgressIndicator(
-            _controller,
-            allowScrubbing: true,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            colors: const VideoProgressColors(
-              playedColor: Colors.blue,
-              bufferedColor: Colors.white24,
-              backgroundColor: Colors.white12,
-            ),
-          ),
-
-        Padding(
-          padding: const EdgeInsets.all(16.0),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                icon: Icon(
-                  _isPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white,
-                  size: 32,
-                ),
-                onPressed: _togglePlay,
-              ),
-              if (_isInitialized)
-                Text(
-                  '${_formatDuration(_controller.value.position)} / ${_formatDuration(_controller.value.duration)}',
-                  style: const TextStyle(color: Colors.white),
-                ),
-            ],
-          ),
+          ],
         ),
-      ],
-    );
-  }
-
-  Widget _buildVideoInfo() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: Colors.black87,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            widget.video.title,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Text(
-                widget.video.formatViews(),
-                style: TextStyle(
-                  color: Colors.grey[400],
-                  fontSize: 14,
-                ),
-              ),
-              Text(
-                ' • ',
-                style: TextStyle(color: Colors.grey[400]),
-              ),
-              Text(
-                widget.video.formatUploadDate(),
-                style: TextStyle(
-                  color: Colors.grey[400],
-                  fontSize: 14,
-                ),
-              ),
-              if (widget.video.getQualityInfo().isNotEmpty) ...[
-                Text(
-                  ' • ',
-                  style: TextStyle(color: Colors.grey[400]),
-                ),
-                Text(
-                  widget.video.getQualityInfo(),
-                  style: TextStyle(
-                    color: Colors.grey[400],
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
+        body: _hasError ? _buildErrorWidget() : _buildVideoPlayer(),
       ),
     );
   }
 
-  Widget _buildErrorDisplay() {
+  Widget _buildErrorWidget() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const Icon(Icons.error_outline, color: Colors.white, size: 48),
+          const Icon(Icons.error_outline, size: 64, color: Colors.red),
           const SizedBox(height: 16),
-          Text(
-            _errorMessage,
-            style: const TextStyle(color: Colors.white),
-            textAlign: TextAlign.center,
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Text(
+              'Error loading video: $_errorMessage',
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16),
+            ),
           ),
           const SizedBox(height: 16),
-          ElevatedButton(
-            onPressed: _initializePlayer,
-            child: const Text('Retry'),
+          ElevatedButton.icon(
+            onPressed: _initializeVideo,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
           ),
         ],
       ),
     );
   }
 
-  Future<void> _showDeleteDialog() async {
-    return showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Video'),
-        content: const Text('Are you sure you want to delete this video?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+  Widget _buildVideoPlayer() {
+    if (!_isInitialized) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            if (_controller.value.isPlaying) {
+              _controller.pause();
+            } else {
+              _controller.play();
+            }
+          });
+        },
+        child: Stack(
+          children: [
+            Center(
+              child: AspectRatio(
+                aspectRatio: _controller.value.aspectRatio,
+                child: VideoPlayer(_controller),
+              ),
+            ),
+            if (_isBuffering)
+              const Center(
+                child: CircularProgressIndicator(color: Colors.white),
+              ),
+            _VideoControls(
+              controller: _controller,
+              isFullScreen: _isFullScreen,
+              onToggleFullScreen: _toggleFullScreen,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Keep existing _VideoControls class unchanged
+class _VideoControls extends StatefulWidget {
+  final VideoPlayerController controller;
+  final bool isFullScreen;
+  final VoidCallback onToggleFullScreen;
+
+  const _VideoControls({
+    Key? key,
+    required this.controller,
+    required this.isFullScreen,
+    required this.onToggleFullScreen,
+  }) : super(key: key);
+
+  @override
+  _VideoControlsState createState() => _VideoControlsState();
+}
+
+class _VideoControlsState extends State<_VideoControls> {
+  bool _showControls = true;
+  Timer? _hideTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startHideTimer();
+  }
+
+  void _startHideTimer() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _showControls = false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _hideTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        setState(() => _showControls = !_showControls);
+        if (_showControls) _startHideTimer();
+      },
+      child: AnimatedOpacity(
+        opacity: _showControls ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 300),
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black54,
+                Colors.transparent,
+                Colors.transparent,
+                Colors.black54,
+              ],
+            ),
           ),
-          TextButton(
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(context);
-              try {
-                await _storage.deleteVideo(widget.video.id);
-                widget.onBack();
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Failed to delete video: $e')),
-                  );
-                }
-              }
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildTopBar(),
+              _buildBottomBar(),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          IconButton(
+            icon: Icon(
+              widget.isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen,
+              color: Colors.white,
+            ),
+            onPressed: widget.onToggleFullScreen,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildProgressBar(),
+        _buildControlButtons(),
+      ],
+    );
+  }
+
+  Widget _buildProgressBar() {
+    return ValueListenableBuilder(
+      valueListenable: widget.controller,
+      builder: (context, VideoPlayerValue value, child) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16.0),
+          child: Row(
+            children: [
+              Text(
+                _formatDuration(value.position),
+                style: const TextStyle(color: Colors.white),
+              ),
+              Expanded(
+                child: Slider(
+                  value: value.position.inMilliseconds.toDouble(),
+                  min: 0.0,
+                  max: value.duration.inMilliseconds.toDouble(),
+                  onChanged: (position) {
+                    widget.controller.seekTo(Duration(
+                      milliseconds: position.toInt(),
+                    ));
+                  },
+                ),
+              ),
+              Text(
+                _formatDuration(value.duration),
+                style: const TextStyle(color: Colors.white),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildControlButtons() {
+    return Padding(
+      padding: const EdgeInsets.all(8.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.replay_10, color: Colors.white),
+            onPressed: () {
+              final position = widget.controller.value.position;
+              widget.controller.seekTo(
+                position - const Duration(seconds: 10),
+              );
+              _startHideTimer();
             },
-            child: const Text('Delete'),
+          ),
+          ValueListenableBuilder(
+            valueListenable: widget.controller,
+            builder: (context, VideoPlayerValue value, child) {
+              return IconButton(
+                icon: Icon(
+                  value.isPlaying ? Icons.pause : Icons.play_arrow,
+                  color: Colors.white,
+                  size: 48,
+                ),
+                onPressed: () {
+                  value.isPlaying
+                      ? widget.controller.pause()
+                      : widget.controller.play();
+                  _startHideTimer();
+                },
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.forward_10, color: Colors.white),
+            onPressed: () {
+              final position = widget.controller.value.position;
+              widget.controller.seekTo(
+                position + const Duration(seconds: 10),
+              );
+              _startHideTimer();
+            },
           ),
         ],
       ),
@@ -481,8 +402,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.toString().padLeft(2, '0');
-    final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
     return '$minutes:$seconds';
   }
 }

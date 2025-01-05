@@ -1,62 +1,54 @@
-import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
-import 'package:universal_html/html.dart' as html;
 
 class VideoUrlService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
   
-  // Constants for URL and code generation
+  // Removed potentially confusing characters: 0,O,1,I,l
   static const String _allowedChars = 
-    'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ23456789';
+    'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   static const int _codeLength = 6;
-  static const String baseUrl = 'for10cloud.com/';
+  static const String baseUrl = 'for10cloud.com/';  // Removed /v/ prefix
 
-  // Enhanced URL generation with format support
+  // Reserved codes that shouldn't be used
+  static final Set<String> _reservedCodes = {
+    'admin', 'login', 'help', 'about', 'terms', 'video',
+    'share', 'test', 'demo', 'support', 'contact', 'dashboard',
+    'register', 'password', 'upload', 'profile', 'settings'
+  };
+  
   String _generateCode() {
     final random = Random.secure();
-    final codeBuffer = StringBuffer();
+    String code;
+    do {
+      code = List.generate(_codeLength, (index) {
+        return _allowedChars[random.nextInt(_allowedChars.length)];
+      }).join();
+    } while (_isReservedCode(code));
     
-    for (var i = 0; i < _codeLength; i++) {
-      codeBuffer.write(_allowedChars[random.nextInt(_allowedChars.length)]);
-    }
-    
-    return codeBuffer.toString();
+    return code;
   }
 
-  // Get complete share URL with format support
-  Future<String?> getShareUrl(String videoId, {bool includeFormat = false}) async {
+  bool _isReservedCode(String code) {
+    return _reservedCodes.contains(code.toLowerCase());
+  }
+
+  Future<String?> getShareUrl(String videoId) async {
     try {
       final code = await getOrCreateShareCode(videoId);
-      final baseShareUrl = 'https://$baseUrl$code';
-
-      if (!includeFormat) return baseShareUrl;
-
-      final videoDoc = await _firestore.collection('videos').doc(videoId).get();
-      final hasHLS = videoDoc.data()?['hasHLSStream'] ?? false;
-      
-      if (hasHLS && (!kIsWeb && Platform.isIOS)) {
-        return '$baseShareUrl?format=hls';
-      }
-      
-      return baseShareUrl;
+      return '$baseUrl$code';
     } catch (e) {
       print('Error generating share URL: $e');
       return null;
     }
   }
 
-  // Enhanced code generation with retries and format tracking
   Future<String> getOrCreateShareCode(String videoId) async {
     try {
-      // Check existing code
+      // First check if video already has a code
       final existing = await _firestore
           .collection('video_urls')
           .where('videoId', isEqualTo: videoId)
@@ -67,50 +59,36 @@ class VideoUrlService {
         return existing.docs.first.data()['shortCode'];
       }
 
-      // Generate new code with retries
+      // Generate new code with collision handling
       int attempts = 0;
       const maxAttempts = 5;
-      
+
       while (attempts < maxAttempts) {
         final code = _generateCode();
         
-        bool success = await FirebaseFirestore.instance.runTransaction<bool>((transaction) async {
+        // Use transaction to prevent race conditions
+        bool success = await _firestore.runTransaction<bool>((transaction) async {
           final docRef = _firestore.collection('video_urls').doc(code);
           final doc = await transaction.get(docRef);
-          
-          if (!doc.exists) {
-            // Get video format info
-            final videoDoc = await _firestore.collection('videos').doc(videoId).get();
-            final videoData = videoDoc.data();
 
-            transaction.set(docRef, {
-              'videoId': videoId,
-              'shortCode': code,
-              'createdAt': FieldValue.serverTimestamp(),
-              'visits': 0,
-              'lastAccessed': FieldValue.serverTimestamp(),
-              'primaryFormat': videoData?['primaryFormat'] ?? 'mp4',
-              'hasHLSStream': videoData?['hasHLSStream'] ?? false,
-              'createdBy': _auth.currentUser?.uid,
-              'isActive': true,
-              'analytics': {
-                'platforms': {},
-                'browsers': {},
-                'countries': {},
-              }
-            });
-            return true;
-          }
-          return false;
+          if (doc.exists) return false;
+
+          transaction.set(docRef, {
+            'videoId': videoId,
+            'shortCode': code,
+            'createdAt': FieldValue.serverTimestamp(),
+            'visits': 0,
+            'lastAccessed': FieldValue.serverTimestamp(),
+            'isActive': true
+          });
+
+          return true;
         });
 
-        if (success) {
-          return code;
-        }
-        
+        if (success) return code;
         attempts++;
       }
-      
+
       throw Exception('Failed to generate unique code after $maxAttempts attempts');
     } catch (e) {
       print('Error generating share code: $e');
@@ -118,185 +96,134 @@ class VideoUrlService {
     }
   }
 
-  // Enhanced video info retrieval with analytics
-  Future<Map<String, dynamic>?> getVideoInfo(String code) async {
+  Future<String?> getVideoId(String code) async {
+    if (code.length != _codeLength || _isReservedCode(code)) return null;
+    
     try {
       final doc = await _firestore
           .collection('video_urls')
           .doc(code)
           .get();
 
-      if (!doc.exists) return null;
-
-      // Update analytics in a separate transaction
-      _firestore.runTransaction((transaction) async {
-        final urlRef = _firestore.collection('video_urls').doc(code);
-        
-        // Update visit count and last accessed
-        transaction.update(urlRef, {
+      if (doc.exists && doc.data()?['isActive'] == true) {
+        // Update visit count and last accessed time
+        await doc.reference.update({
           'visits': FieldValue.increment(1),
-          'lastAccessed': FieldValue.serverTimestamp(),
-          'analytics.platforms.${kIsWeb ? 'web' : Platform.operatingSystem}': FieldValue.increment(1),
+          'lastAccessed': FieldValue.serverTimestamp()
         });
-
-        // Track viewer if logged in
-        if (_auth.currentUser != null) {
-          final analyticsRef = _firestore
-              .collection('video_analytics')
-              .doc('${code}_${_auth.currentUser!.uid}');
-              
-          transaction.set(analyticsRef, {
-            'userId': _auth.currentUser!.uid,
-            'videoCode': code,
-            'lastViewed': FieldValue.serverTimestamp(),
-            'viewCount': FieldValue.increment(1),
-          }, SetOptions(merge: true));
-        }
-      });
-      
-      return {
-        'videoId': doc.data()?['videoId'],
-        'format': doc.data()?['primaryFormat'],
-        'hasHLSStream': doc.data()?['hasHLSStream'] ?? false,
-        'isActive': doc.data()?['isActive'] ?? true,
-      };
+        
+        return doc.data()?['videoId'];
+      }
+      return null;
     } catch (e) {
-      print('Error getting video info: $e');
+      print('Error getting video ID: $e');
       return null;
     }
   }
 
-  // Enhanced sharing with format support
-  Future<void> shareVideo(String videoId, BuildContext context) async {
-    try {
-      final shareUrl = await getShareUrl(videoId, includeFormat: true);
-      if (shareUrl == null) throw Exception('Failed to generate share URL');
-
-      if (kIsWeb) {
-        await _webShare(shareUrl, context);
-      } else if (Platform.isIOS || Platform.isAndroid) {
-        await Share.share(
-          shareUrl,
-          subject: 'Check out this video!',
-        );
-      } else {
-        await copyToClipboard(videoId, context);
-      }
-    } catch (e) {
-      _showErrorSnackBar(context, 'Failed to share video: $e');
-    }
-  }
-
-  // Enhanced clipboard handling with format support
   Future<void> copyToClipboard(String videoId, BuildContext context) async {
     try {
-      final shareUrl = await getShareUrl(videoId, includeFormat: true);
-      if (shareUrl == null) throw Exception('Failed to generate share URL');
-
-      if (kIsWeb) {
-        html.window.navigator.clipboard?.writeText(shareUrl);
-      } else {
+      final code = await getOrCreateShareCode(videoId);
+      final shareUrl = '$baseUrl$code';
+      
+      try {
         await Clipboard.setData(ClipboardData(text: shareUrl));
+      } catch (clipboardError) {
+        print('Primary clipboard method failed: $clipboardError');
+        rethrow;
       }
       
-      _showSuccessSnackBar(context, 'URL copied to clipboard!');
-    } catch (e) {
-      _showErrorSnackBar(context, 'Failed to copy URL: $e');
-    }
-  }
-
-  // Web sharing with format support
-  Future<void> _webShare(String url, BuildContext context) async {
-    try {
-      if (html.window.navigator.share != null) {
-        await html.window.navigator.share({
-          'title': 'Share Video',
-          'text': 'Check out this video!',
-          'url': url,
-        });
-      } else {
-        html.window.navigator.clipboard?.writeText(url);
-        _showSuccessSnackBar(context, 'URL copied to clipboard!');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('URL copied to clipboard!'),
+                      Text(
+                        shareUrl,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: Colors.white70
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 3),
+            action: SnackBarAction(
+              label: 'Copy Again',
+              textColor: Colors.white,
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: shareUrl));
+              },
+            ),
+          ),
+        );
       }
     } catch (e) {
-      _showErrorSnackBar(context, 'Failed to share: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Failed to copy URL: $e'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
-  // Update video format information
-  Future<void> updateVideoFormat(String code, {
-    required String format,
-    required bool hasHLSStream,
-  }) async {
-    try {
-      await _firestore
-          .collection('video_urls')
-          .doc(code)
-          .update({
-            'primaryFormat': format,
-            'hasHLSStream': hasHLSStream,
-            'lastUpdated': FieldValue.serverTimestamp(),
-            'updatedBy': _auth.currentUser?.uid,
-          });
-    } catch (e) {
-      print('Error updating video format: $e');
-    }
-  }
-
-  // Enhanced cleanup with analytics preservation
   Future<void> deactivateUrl(String code) async {
     try {
       await _firestore
           .collection('video_urls')
           .doc(code)
-          .update({
-            'isActive': false,
-            'deactivatedAt': FieldValue.serverTimestamp(),
-            'deactivatedBy': _auth.currentUser?.uid,
-          });
+          .update({'isActive': false});
     } catch (e) {
       print('Error deactivating URL: $e');
     }
   }
 
-  void _showSuccessSnackBar(BuildContext context, String message) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 2),
-          backgroundColor: Colors.green,
-        ),
-      );
-    }
-  }
-
-  void _showErrorSnackBar(BuildContext context, String message) {
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 3),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  // Analytics methods
-  Future<Map<String, dynamic>> getUrlAnalytics(String code) async {
+  Future<void> cleanupOldUrls({int daysOld = 30}) async {
     try {
-      final doc = await _firestore
+      final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
+      final oldUrls = await _firestore
           .collection('video_urls')
-          .doc(code)
+          .where('lastAccessed', isLessThan: cutoffDate)
+          .where('visits', isLessThan: 10)  // Only delete rarely accessed URLs
           .get();
 
-      return doc.data()?['analytics'] ?? {};
+      for (var doc in oldUrls.docs) {
+        await doc.reference.delete();
+      }
     } catch (e) {
-      print('Error getting analytics: $e');
-      return {};
+      print('Error cleaning up old URLs: $e');
     }
+  }
+
+  bool isValidVideoCode(String code) {
+    return code.length == _codeLength && 
+           !_isReservedCode(code) &&
+           code.split('').every((char) => _allowedChars.contains(char));
   }
 }

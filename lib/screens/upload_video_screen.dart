@@ -1,13 +1,8 @@
-import 'dart:io' show Platform;
-
 import 'package:file_picker/file_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../screens/upload_service.dart';
 import '../services/storage_service.dart';
-import '../services/video_format_handler.dart';
 
 class UploadVideoScreen extends StatefulWidget {
   const UploadVideoScreen({Key? key}) : super(key: key);
@@ -20,104 +15,116 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
   final _titleController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   final StorageService _storage = StorageService();
-  final _auth = FirebaseAuth.instance;
   
   bool _isUploading = false;
-  bool _isProcessing = false;
   double _uploadProgress = 0;
   String? _selectedVideoName;
   String? _selectedThumbnailName;
-  String? _processingStatus;
-  String _selectedQuality = 'medium';
-  bool _generateHLS = false;
   PlatformFile? _videoFile;
   PlatformFile? _thumbnailFile;
+  bool _isProcessing = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _checkAuth();
-    _initializeUpload();
-  }
+  // Constants
+  static const int maxVideoSize = 500 * 1024 * 1024; // 500MB
+  static const int maxThumbnailSize = 5 * 1024 * 1024; // 5MB
 
-  void _checkAuth() {
-    if (_auth.currentUser == null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.of(context).pushReplacementNamed('/login');
-      });
+  Future<void> _pickVideo() async {
+    setState(() => _isProcessing = true);
+    try {
+      // Configure options for cross-platform compatibility
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['mp4'],
+        allowMultiple: false,
+        withData: true,
+        lockParentWindow: true, // Helps with Windows modal dialog
+        onFileLoading: (FilePickerStatus status) {
+          // Handle file loading status
+          if (mounted) {
+            setState(() => _isProcessing = status == FilePickerStatus.picking);
+          }
+        },
+      );
+
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
+        
+        // Validate file extension
+        if (!file.name.toLowerCase().endsWith('.mp4')) {
+          _showError('Please select an MP4 video file');
+          return;
+        }
+
+        // Validate file size
+        if (file.size > maxVideoSize) {
+          _showError('Video file must be less than 500MB');
+          return;
+        }
+
+        // Validate file bytes are available
+        if (file.bytes == null && !kIsWeb) {
+          _showError('Unable to read file data');
+          return;
+        }
+
+        setState(() {
+          _videoFile = file;
+          _selectedVideoName = file.name;
+        });
+      }
+    } catch (e) {
+      _showError('Error selecting video: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
     }
   }
 
-  Future<void> _initializeUpload() async {
-    _generateHLS = !kIsWeb && Platform.isIOS;
-  }
+  Future<void> _pickThumbnail() async {
+    setState(() => _isProcessing = true);
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png'],
+        allowMultiple: false,
+        withData: true,
+        lockParentWindow: true,
+        onFileLoading: (FilePickerStatus status) {
+          if (mounted) {
+            setState(() => _isProcessing = status == FilePickerStatus.picking);
+          }
+        },
+      );
 
-Future<void> _pickVideo() async {
-  if (_isUploading) return;
-  
-  setState(() => _isProcessing = true);
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.video,
-      allowMultiple: false,
-      withData: true,
-      allowedExtensions: VideoFormatHandler.getSupportedFormats(),
-    );
+      if (result != null && result.files.isNotEmpty) {
+        final file = result.files.first;
 
-    if (result != null) {
-      // Validate file size
-      if (result.files.first.size > UploadService.maxVideoSize) {
-        _showError('Video file must be less than ${UploadService.maxVideoSize ~/ (1024 * 1024)}MB');
-        return;
+        // Validate file size
+        if (file.size > maxThumbnailSize) {
+          _showError('Thumbnail must be less than 5MB');
+          return;
+        }
+
+        // Validate file bytes are available
+        if (file.bytes == null && !kIsWeb) {
+          _showError('Unable to read thumbnail data');
+          return;
+        }
+
+        setState(() {
+          _thumbnailFile = file;
+          _selectedThumbnailName = file.name;
+        });
       }
-
-      // Validate file format
-      final extension = result.files.first.name.split('.').last.toLowerCase();
-      if (!VideoFormatHandler.isValidFormat('video/$extension')) {  // Changed this line
-        _showError('Unsupported video format');
-        return;
+    } catch (e) {
+      _showError('Error selecting thumbnail: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
       }
-
-      setState(() {
-        _videoFile = result.files.first;
-        _selectedVideoName = result.files.first.name;
-      });
     }
-  } catch (e) {
-    _showError('Error selecting video: $e');
-  } finally {
-    setState(() => _isProcessing = false);
   }
-}
-
-Future<void> _pickThumbnail() async {
-  if (_isUploading) return;
-
-  setState(() => _isProcessing = true);
-  try {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp'],
-      withData: true,
-    );
-
-    if (result != null) {
-      if (result.files.first.size > UploadService.maxThumbnailSize) {
-        _showError('Thumbnail must be less than ${UploadService.maxThumbnailSize ~/ (1024 * 1024)}MB');
-        return;
-      }
-
-      setState(() {
-        _thumbnailFile = result.files.first;
-        _selectedThumbnailName = result.files.first.name;
-      });
-    }
-  } catch (e) {
-    _showError('Error selecting thumbnail: $e');
-  } finally {
-    setState(() => _isProcessing = false);
-  }
-}
 
   Future<void> _uploadVideo() async {
     if (!_formKey.currentState!.validate()) return;
@@ -129,42 +136,49 @@ Future<void> _pickThumbnail() async {
     setState(() {
       _isUploading = true;
       _uploadProgress = 0;
-      _processingStatus = 'Initializing upload...';
     });
 
     try {
-      final uploadFormat = VideoFormatHandler.getUploadFormat(
-        fileName: _videoFile!.name,
-        fileSize: _videoFile!.size,
-        generateHLS: _generateHLS,
+      // Show immediate feedback
+      setState(() => _uploadProgress = 0.1);
+
+      // Upload thumbnail first (smaller file)
+      final thumbnailUrl = await _storage.uploadToR2(
+        _thumbnailFile!.bytes!,
+        'thumbnails/${DateTime.now().millisecondsSinceEpoch}_${_thumbnailFile!.name}',
+        'image/jpeg',
       );
 
-      await _storage.uploadVideoWithMetadata(
-        title: _titleController.text,
-        videoBytes: _videoFile!.bytes!,
-        videoFileName: _videoFile!.name,
-        thumbnailBytes: _thumbnailFile!.bytes!,
-        thumbnailFileName: _thumbnailFile!.name,
-        quality: _selectedQuality,
-        generateHLS: uploadFormat['generateHLS'],
+      setState(() => _uploadProgress = 0.2);
+
+      // Upload video with progress
+      final videoUrl = await _storage.uploadToR2(
+        _videoFile!.bytes!,
+        'videos/${DateTime.now().millisecondsSinceEpoch}_${_videoFile!.name}',
+        'video/mp4',
         onProgress: (progress) {
-          setState(() {
-            _uploadProgress = progress;
-          });
-        },
-        onStatusUpdate: (status) {
-          setState(() {
-            _processingStatus = status;
-          });
+          if (mounted) {
+            setState(() {
+              // Scale progress from 20% to 90%
+              _uploadProgress = 0.2 + (progress * 0.7);
+            });
+          }
         },
       );
+
+      // Save metadata
+      setState(() => _uploadProgress = 0.9);
+      await _storage.saveVideoMetadata(
+        title: _titleController.text,
+        videoUrl: videoUrl,
+        thumbnailUrl: thumbnailUrl,
+      );
+
+      setState(() => _uploadProgress = 1.0);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Video uploaded successfully!'),
-            behavior: SnackBarBehavior.floating,
-          ),
+          const SnackBar(content: Text('Video uploaded successfully!')),
         );
         Navigator.pop(context, true);
       }
@@ -172,10 +186,7 @@ Future<void> _pickThumbnail() async {
       _showError('Upload failed: $e');
     } finally {
       if (mounted) {
-        setState(() {
-          _isUploading = false;
-          _processingStatus = null;
-        });
+        setState(() => _isUploading = false);
       }
     }
   }
@@ -221,46 +232,30 @@ Future<void> _pickThumbnail() async {
               ),
               const SizedBox(height: 24),
 
-              // Quality Selection
-              DropdownButtonFormField<String>(
-                value: _selectedQuality,
-                decoration: const InputDecoration(
-                  labelText: 'Video Quality',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.high_quality),
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'high', child: Text('High Quality')),
-                  DropdownMenuItem(value: 'medium', child: Text('Medium Quality')),
-                  DropdownMenuItem(value: 'low', child: Text('Low Quality')),
-                ],
-                onChanged: _isUploading ? null : (value) {
-                  setState(() => _selectedQuality = value!);
-                },
-              ),
-              const SizedBox(height: 24),
-
               // File Selection Cards
               _buildFileCard(
-                'Video File',
+                'Video File (MP4)',
                 _selectedVideoName,
                 Icons.video_library,
                 _isUploading ? null : _pickVideo,
               ),
               const SizedBox(height: 16),
               _buildFileCard(
-                'Thumbnail',
+                'Thumbnail (JPG/PNG)',
                 _selectedThumbnailName,
                 Icons.image,
                 _isUploading ? null : _pickThumbnail,
               ),
+
               const SizedBox(height: 24),
 
               if (_isUploading || _isProcessing) ...[
                 LinearProgressIndicator(value: _uploadProgress),
                 const SizedBox(height: 8),
                 Text(
-                  _processingStatus ?? 'Processing...',
+                  _isProcessing 
+                    ? 'Processing...' 
+                    : 'Uploading: ${(_uploadProgress * 100).toStringAsFixed(0)}%',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
@@ -276,15 +271,6 @@ Future<void> _pickThumbnail() async {
                   textStyle: const TextStyle(fontSize: 18),
                 ),
               ),
-
-              if (_videoFile != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  'Selected file size: ${(_videoFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
-                ),
-              ],
             ],
           ),
         ),
@@ -293,8 +279,8 @@ Future<void> _pickThumbnail() async {
   }
 
   Widget _buildFileCard(
-    String title,
-    String? selectedFileName,
+    String title, 
+    String? selectedFileName, 
     IconData icon,
     VoidCallback? onSelect,
   ) {
@@ -323,9 +309,6 @@ Future<void> _pickThumbnail() async {
               onPressed: onSelect,
               icon: Icon(icon),
               label: Text('Select $title'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
-              ),
             ),
           ],
         ),
