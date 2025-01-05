@@ -217,7 +217,7 @@ class VideoUrlService {
         await doc.reference.delete();
       }
     } catch (e) {
-      print('Error cleaning up old URLs: $e');
+      print('Errorr cleaning up old URLs: $e');
     }
   }
 
