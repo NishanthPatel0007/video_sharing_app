@@ -1,0 +1,6 @@
+android {
+    defaultConfig {
+        // ... other configs ...
+        buildConfigField "String", "WORKER_URL", "\"https://your-cloudflare-worker-url.workers.dev\""
+    }
+} 

@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isValidVideo() {
+      let data = request.resource.data;
+      return data.keys().hasAll([
+        'title', 
+        'videoUrl', 
+        'thumbnailUrl', 
+        'userId', 
+        'userEmail',
+        'createdAt',
+        'views'
+      ]) &&
+      data.title is string &&
+      data.title.size() <= 100 &&
+      data.videoUrl is string &&
+      data.thumbnailUrl is string &&
+      data.userId == request.auth.uid &&
+      data.userEmail is string &&
+      data.views is number &&
+      data.createdAt is timestamp;
+    }
+
+    // Videos collection
+    match /videos/{videoId} {
+      allow read, list: if true;  // Public read access
+      allow create: if isAuthenticated() && isValidVideo();
+      allow update: if isOwner(resource.data.userId) || 
+        (request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['views', 'viewHistory', 'durationSeconds', 'likes']));
+      allow delete: if isOwner(resource.data.userId);
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow update: if isOwner(userId);
+      allow delete: if false;  // Prevent user deletion from client
+    }
+
+    // Analytics collection
+    match /analytics/{docId} {
+      allow read: if isAuthenticated();
+      allow create: if true;
+      allow update, delete: if false;
+
+      match /views/{viewId} {
+        allow read: if true;
+        allow create: if true;
+        allow update, delete: if false;
+      }
+    }
+
+    // Reports collection
+    match /reports/{reportId} {
+      allow create: if true;  // Anyone can create reports
+      allow read: if false;   // Only backend can read reports
+    }
+
+    // Add this new section for video_urls
+    match /video_urls/{urlId} {
+      allow read: if true;  // Anyone can read share codes
+      allow create: if request.auth != null &&
+        request.resource.data.keys().hasAll(['videoId', 'shortCode', 'createdAt', 'visits']) &&
+        request.resource.data.videoId is string &&
+        request.resource.data.shortCode is string;
+      allow update: if request.auth != null &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['visits', 'lastAccessed']);
+    }
+  }
+}

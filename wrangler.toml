@@ -1,0 +1,25 @@
+name = "video-sharing-app01"
+account_id = "666bfc1258e239123f4ced095cb958e4"
+compatibility_date = "2024-01-08"
+
+[site]
+bucket = "./build/web"
+
+[build]
+command = "flutter build web --release"
+
+[env.production]
+workers_dev = false
+route = "for10cloud.com/*"
+
+# From your screenshot
+[triggers]
+crons = []
+
+[vars]
+ENVIRONMENT = "production"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "cloudflarebuckey2002"
+preview_bucket_name = "cloudflarebuckey2002-preview"

@@ -1,32 +1,47 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <base href="/">
+  <base href="$FLUTTER_BASE_HREF">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="A video sharing application">
-  <meta http-equiv="Content-Security-Policy" content="upgrade-insecure-requests">
-  <meta http-equiv="Cross-Origin-Opener-Policy" content="same-origin">
-  <meta http-equiv="Cross-Origin-Embedder-Policy" content="require-corp">
+  
+  <!-- Primary Meta Tags -->
+  <title>For10Cloud - Earn Up to ₹40,000 Per Video</title>
+  <meta name="title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
+  <meta name="description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video. Join the fastest growing video sharing platform.">
+  <meta name="keywords" content="for10, for10cloud, ForTen, video sharing, earn money, content creator, for10cloud.com">
 
-  <title>For10Cloud - Video Sharing</title>
+  <!-- Open Graph / Facebook -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://for10cloud.com/">
+  <meta property="og:title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
+  <meta property="og:description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.">
+  <meta property="og:image" content="https://for10cloud.com/assets/og-image.png">
+
+  <!-- Twitter -->
+  <meta property="twitter:card" content="summary_large_image">
+  <meta property="twitter:url" content="https://for10cloud.com/">
+  <meta property="twitter:title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
+  <meta property="twitter:description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.">
+  <meta property="twitter:image" content="https://for10cloud.com/assets/og-image.png">
 
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="For10Cloud">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-  <link rel="icon" type="image/png" href="favicon.png">
-
-
   
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Manifest -->
+  <link rel="manifest" href="manifest.json">
+
   <!-- Firebase SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-firestore-compat.js"></script>
   
-  <!-- Initialize Firebase -->
   <script>
     const firebaseConfig = {
       apiKey: "AIzaSyDC2U3n6TFc0QIlAp6e64PJjVnPYhdb8qI",
@@ -41,138 +56,42 @@
   </script>
 
   <script>
-    // The value below is injected by flutter build, do not touch.
-    var serviceWorkerVersion = null;
-  </script>
-
-  <!-- Flutter initialization -->
-  <script src="flutter.js" defer></script>
-
-  <style>
-    body {
-      inset: 0;
-      overflow: hidden;
-      margin: 0;
-      padding: 0;
-      position: fixed;
-      height: 100%;
-      background-color: #1a1a1a;
-    }
-
-    .center {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100%;
-      width: 100%;
-    }
-
-    #loading {
-      position: fixed;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background-color: #1a1a1a;
-      transition: opacity .4s ease-out;
-    }
-
-    #loading img {
-      width: 80px;
-      height: 80px;
-      animation: 1s ease-in-out 0s infinite alternate breathe;
-      opacity: .66;
-      transition: opacity .4s;
-    }
-
-    #loading.main_done img {
-      opacity: 1;
-    }
-
-    #loading .progress {
-      margin-top: 20px;
-      color: #ffffff;
-      font-family: sans-serif;
-    }
-
-    @keyframes breathe {
-      from {
-        transform: scale(1);
-      }
-      to {
-        transform: scale(0.95);
-      }
-    }
-
-    #flutter_target {
-      width: 100%;
-      height: 100%;
-      opacity: 0;
-      transition: opacity .4s ease-out;
-    }
-
-    #flutter_target.ready {
-      opacity: 1;
-    }
-  </style>
-</head>
-<body>
-  <div id="loading">
-    <img src="icons/Icon-192.png" alt="Loading indicator..." />
-    <div class="progress">Loading...</div>
-  </div>
-
-  <div id="flutter_target"></div>
-
-  <script>
-    window.addEventListener('load', function() {
-      // Add loading progress indicator
-      let loadingDiv = document.querySelector('#loading');
-      let progressDiv = loadingDiv.querySelector('.progress');
-      let flutterTarget = document.querySelector('#flutter_target');
-
+    window.addEventListener('load', function(ev) {
       _flutter.loader.loadEntrypoint({
         serviceWorker: {
           serviceWorkerVersion: serviceWorkerVersion,
         },
-        onEntrypointLoaded: async function(engineInitializer) {
-          progressDiv.textContent = 'Initializing engine...';
-          
-          try {
-            const appRunner = await engineInitializer.initializeEngine({
-              hostElement: flutterTarget,
-              renderer: 'canvaskit' // or 'html' based on your build
-            });
-
-            progressDiv.textContent = 'Starting app...';
-            
-            await appRunner.runApp();
-
-            // Fade out loading screen
-            loadingDiv.style.opacity = '0';
-            flutterTarget.classList.add('ready');
-            
-            // Remove loading screen after transition
-            setTimeout(() => {
-              loadingDiv.remove();
-            }, 500);
-
-          } catch (e) {
-            progressDiv.textContent = 'Error: ' + e;
-            console.error('Flutter initialization error:', e);
-          }
+        onEntrypointLoaded: function(engineInitializer) {
+          engineInitializer.initializeEngine().then(function(appRunner) {
+            appRunner.runApp();
+          });
         }
       });
-
-      // Handle service worker updates
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('flutter-first-frame', function() {
-          navigator.serviceWorker.register('flutter_service_worker.js');
-        });
-      }
     });
   </script>
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebApplication",
+    "name": "For10Cloud",
+    "applicationCategory": "Video Sharing Platform",
+    "description": "Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.",
+    "url": "https://for10cloud.com",
+    "offers": {
+      "@type": "Offer",
+      "description": "Earn up to ₹40,000 per video",
+      "priceCurrency": "INR",
+      "price": "0",
+      "availability": "https://schema.org/InStock"
+    },
+    "keywords": "for10, for10cloud, ForTen, video sharing, earn money, content creator",
+    "operatingSystem": "Any",
+    "browserRequirements": "Requires JavaScript"
+  }
+  </script>
+</head>
+<body>
+  <script src="main.dart.js" type="application/javascript"></script>
 </body>
 </html>

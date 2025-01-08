@@ -9,6 +9,7 @@ class Video {
   final String? userEmail;
   final DateTime createdAt;
   final int views;
+  final double size;
 
   Video({
     required this.id,
@@ -19,6 +20,7 @@ class Video {
     this.userEmail,
     required this.createdAt,
     this.views = 0,
+    this.size = 0.0,
   });
 
   factory Video.fromFirestore(DocumentSnapshot doc) {
@@ -32,6 +34,7 @@ class Video {
       userEmail: data['userEmail'],
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       views: data['views'] ?? 0,
+      size: (data['size'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -44,6 +47,7 @@ class Video {
       'userEmail': userEmail,
       'createdAt': Timestamp.fromDate(createdAt),
       'views': views,
+      'size': size,
     };
   }
 }

@@ -1,5 +1,4 @@
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/storage_service.dart';
@@ -24,60 +23,28 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
   PlatformFile? _thumbnailFile;
   bool _isProcessing = false;
 
-  // Constants
-  static const int maxVideoSize = 500 * 1024 * 1024; // 500MB
-  static const int maxThumbnailSize = 5 * 1024 * 1024; // 5MB
-
   Future<void> _pickVideo() async {
     setState(() => _isProcessing = true);
     try {
-      // Configure options for cross-platform compatibility
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['mp4'],
+        type: FileType.video,
         allowMultiple: false,
-        withData: true,
-        lockParentWindow: true, // Helps with Windows modal dialog
-        onFileLoading: (FilePickerStatus status) {
-          // Handle file loading status
-          if (mounted) {
-            setState(() => _isProcessing = status == FilePickerStatus.picking);
-          }
-        },
+        withData: true, // Pre-load the file data
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
-        
-        // Validate file extension
-        if (!file.name.toLowerCase().endsWith('.mp4')) {
-          _showError('Please select an MP4 video file');
-          return;
-        }
-
-        // Validate file size
-        if (file.size > maxVideoSize) {
+      if (result != null) {
+        if (result.files.first.size > 500 * 1024 * 1024) {
           _showError('Video file must be less than 500MB');
           return;
         }
 
-        // Validate file bytes are available
-        if (file.bytes == null && !kIsWeb) {
-          _showError('Unable to read file data');
-          return;
-        }
-
         setState(() {
-          _videoFile = file;
-          _selectedVideoName = file.name;
+          _videoFile = result.files.first;
+          _selectedVideoName = result.files.first.name;
         });
       }
-    } catch (e) {
-      _showError('Error selecting video: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -87,42 +54,19 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png'],
-        allowMultiple: false,
         withData: true,
-        lockParentWindow: true,
-        onFileLoading: (FilePickerStatus status) {
-          if (mounted) {
-            setState(() => _isProcessing = status == FilePickerStatus.picking);
-          }
-        },
       );
 
-      if (result != null && result.files.isNotEmpty) {
-        final file = result.files.first;
-
-        // Validate file size
-        if (file.size > maxThumbnailSize) {
-          _showError('Thumbnail must be less than 5MB');
-          return;
-        }
-
-        // Validate file bytes are available
-        if (file.bytes == null && !kIsWeb) {
-          _showError('Unable to read thumbnail data');
-          return;
-        }
-
+      if (result != null) {
         setState(() {
-          _thumbnailFile = file;
-          _selectedThumbnailName = file.name;
+          _thumbnailFile = result.files.first;
+          _selectedThumbnailName = result.files.first.name;
         });
       }
     } catch (e) {
       _showError('Error selecting thumbnail: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isProcessing = false);
-      }
+      setState(() => _isProcessing = false);
     }
   }
 
@@ -157,12 +101,10 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
         'videos/${DateTime.now().millisecondsSinceEpoch}_${_videoFile!.name}',
         'video/mp4',
         onProgress: (progress) {
-          if (mounted) {
-            setState(() {
-              // Scale progress from 20% to 90%
-              _uploadProgress = 0.2 + (progress * 0.7);
-            });
-          }
+          setState(() {
+            // Scale progress from 20% to 90%
+            _uploadProgress = 0.2 + (progress * 0.7);
+          });
         },
       );
 
@@ -197,7 +139,6 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
       ),
     );
   }
@@ -234,14 +175,14 @@ class _UploadVideoScreenState extends State<UploadVideoScreen> {
 
               // File Selection Cards
               _buildFileCard(
-                'Video File (MP4)',
+                'Video File',
                 _selectedVideoName,
                 Icons.video_library,
                 _isUploading ? null : _pickVideo,
               ),
               const SizedBox(height: 16),
               _buildFileCard(
-                'Thumbnail (JPG/PNG)',
+                'Thumbnail',
                 _selectedThumbnailName,
                 Icons.image,
                 _isUploading ? null : _pickThumbnail,

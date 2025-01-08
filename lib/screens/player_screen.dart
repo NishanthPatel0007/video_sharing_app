@@ -8,19 +8,13 @@ import '../services/storage_service.dart';
 
 class PlayerScreen extends StatefulWidget {
   final Video video;
-  final bool autoPlay;  // New parameter for auto-play
   
-  const PlayerScreen({
-    Key? key, 
-    required this.video, 
-    this.autoPlay = true,  // Default to true
-  }) : super(key: key);
+  const PlayerScreen({Key? key, required this.video}) : super(key: key);
 
   @override
   _PlayerScreenState createState() => _PlayerScreenState();
 }
-
-class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderStateMixin {
+class _PlayerScreenState extends State<PlayerScreen> {
   late VideoPlayerController _controller;
   bool _isInitialized = false;
   bool _isBuffering = false;
@@ -28,17 +22,10 @@ class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderSt
   bool _hasError = false;
   String _errorMessage = '';
   final StorageService _storage = StorageService();
-  late AnimationController _fadeController;
-  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    _fadeController = AnimationController(
-      duration: const Duration(milliseconds: 500),
-      vsync: this,
-    );
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(_fadeController);
     _initializeVideo();
     _incrementViews();
   }
@@ -56,30 +43,20 @@ class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderSt
 
       await _controller.initialize();
       _controller.addListener(_videoListener);
-      
-      if (mounted) {
-        setState(() {
-          _isInitialized = true;
-          _isBuffering = false;
-          _hasError = false;
-        });
-        
-        // Start fade-in animation
-        _fadeController.forward();
-        
-        // Auto-play if enabled
-        if (widget.autoPlay) {
-          _controller.play();
-        }
-      }
+      setState(() {
+        _isInitialized = true;
+        _isBuffering = false;
+        _hasError = false;
+      });
+      _controller.play();
     } catch (e) {
       print('Video initialization error: $e');
+      setState(() {
+        _isBuffering = false;
+        _hasError = true;
+        _errorMessage = e.toString();
+      });
       if (mounted) {
-        setState(() {
-          _isBuffering = false;
-          _hasError = true;
-          _errorMessage = e.toString();
-        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error loading video: $e'),
@@ -97,7 +74,7 @@ class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderSt
 
   void _videoListener() {
     final isBuffering = _controller.value.isBuffering;
-    if (_isBuffering != isBuffering && mounted) {
+    if (_isBuffering != isBuffering) {
       setState(() => _isBuffering = isBuffering);
     }
   }
@@ -118,32 +95,22 @@ class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderSt
   void dispose() {
     _controller.removeListener(_videoListener);
     _controller.dispose();
-    _fadeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        if (_isFullScreen) {
-          _toggleFullScreen();
-          return false;
-        }
-        return true;
-      },
-      child: Scaffold(
-        appBar: _isFullScreen ? null : AppBar(
-          title: Text(widget.video.title),
-          actions: [
-            IconButton(
-              icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
-              onPressed: _toggleFullScreen,
-            ),
-          ],
-        ),
-        body: _hasError ? _buildErrorWidget() : _buildVideoPlayer(),
+    return Scaffold(
+      appBar: _isFullScreen ? null : AppBar(
+        title: Text(widget.video.title),
+        actions: [
+          IconButton(
+            icon: Icon(_isFullScreen ? Icons.fullscreen_exit : Icons.fullscreen),
+            onPressed: _toggleFullScreen,
+          ),
+        ],
       ),
+      body: _hasError ? _buildErrorWidget() : _buildVideoPlayer(),
     );
   }
 
@@ -178,43 +145,40 @@ class _PlayerScreenState extends State<PlayerScreen> with SingleTickerProviderSt
       return const Center(child: CircularProgressIndicator());
     }
 
-    return FadeTransition(
-      opacity: _fadeAnimation,
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            if (_controller.value.isPlaying) {
-              _controller.pause();
-            } else {
-              _controller.play();
-            }
-          });
-        },
-        child: Stack(
-          children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: _controller.value.aspectRatio,
-                child: VideoPlayer(_controller),
-              ),
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          if (_controller.value.isPlaying) {
+            _controller.pause();
+          } else {
+            _controller.play();
+          }
+        });
+      },
+      child: Stack(
+        children: [
+          Center(
+            child: AspectRatio(
+              aspectRatio: _controller.value.aspectRatio,
+              child: VideoPlayer(_controller),
             ),
-            if (_isBuffering)
-              const Center(
-                child: CircularProgressIndicator(color: Colors.white),
-              ),
-            _VideoControls(
-              controller: _controller,
-              isFullScreen: _isFullScreen,
-              onToggleFullScreen: _toggleFullScreen,
+          ),
+          if (_isBuffering)
+            const Center(
+              child: CircularProgressIndicator(color: Colors.white),
             ),
-          ],
-        ),
+          _VideoControls(
+            controller: _controller,
+            isFullScreen: _isFullScreen,
+            onToggleFullScreen: _toggleFullScreen,
+          ),
+        ],
       ),
     );
   }
 }
 
-// Keep existing _VideoControls class unchanged
+// The _VideoControls class remains unchanged
 class _VideoControls extends StatefulWidget {
   final VideoPlayerController controller;
   final bool isFullScreen;
