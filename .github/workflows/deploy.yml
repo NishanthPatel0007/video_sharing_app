@@ -15,14 +15,19 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.13.9'
+          flutter-version: '3.16.0'
           channel: 'stable'
 
+      - name: Enable web
+        run: flutter config --enable-web
+
       - name: Install dependencies
-        run: flutter pub get
+        run: |
+          flutter clean
+          flutter pub get
 
       - name: Build web
-        run: flutter build web --release
+        run: flutter build web --release --web-renderer canvaskit
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/pages-action@v1

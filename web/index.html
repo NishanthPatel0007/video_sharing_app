@@ -4,94 +4,28 @@
   <base href="$FLUTTER_BASE_HREF">
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Video sharing platform">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   
-  <!-- Primary Meta Tags -->
-  <title>For10Cloud - Earn Up to ₹40,000 Per Video</title>
-  <meta name="title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
-  <meta name="description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video. Join the fastest growing video sharing platform.">
-  <meta name="keywords" content="for10, for10cloud, ForTen, video sharing, earn money, content creator, for10cloud.com">
-
-  <!-- Open Graph / Facebook -->
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://for10cloud.com/">
-  <meta property="og:title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
-  <meta property="og:description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.">
-  <meta property="og:image" content="https://for10cloud.com/assets/og-image.png">
-
-  <!-- Twitter -->
-  <meta property="twitter:card" content="summary_large_image">
-  <meta property="twitter:url" content="https://for10cloud.com/">
-  <meta property="twitter:title" content="For10Cloud - Earn Up to ₹40,000 Per Video">
-  <meta property="twitter:description" content="Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.">
-  <meta property="twitter:image" content="https://for10cloud.com/assets/og-image.png">
-
   <!-- iOS meta tags & icons -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="For10Cloud">
   
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
-
-  <!-- Manifest -->
+  <title>For10Cloud</title>
   <link rel="manifest" href="manifest.json">
-
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.9.0/firebase-firestore-compat.js"></script>
-  
+  <script src="flutter.js" defer></script>
+</head>
+<body>
   <script>
-    const firebaseConfig = {
-      apiKey: "AIzaSyDC2U3n6TFc0QIlAp6e64PJjVnPYhdb8qI",
-      authDomain: "latestuploadvideo.firebaseapp.com",
-      projectId: "latestuploadvideo",
-      storageBucket: "latestuploadvideo.appspot.com",
-      messagingSenderId: "373248236240",
-      appId: "1:373248236240:web:e47887865d55d0a0bfdcd5",
-      measurementId: "G-KXQVNS2Q9P"
-    };
-    firebase.initializeApp(firebaseConfig);
-  </script>
-
-  <script>
-    window.addEventListener('load', function(ev) {
-      _flutter.loader.loadEntrypoint({
+    window.addEventListener('load', function() {
+      _flutter.loader.load({
         serviceWorker: {
           serviceWorkerVersion: serviceWorkerVersion,
-        },
-        onEntrypointLoaded: function(engineInitializer) {
-          engineInitializer.initializeEngine().then(function(appRunner) {
-            appRunner.runApp();
-          });
         }
       });
     });
   </script>
-
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "WebApplication",
-    "name": "For10Cloud",
-    "applicationCategory": "Video Sharing Platform",
-    "description": "Share videos and earn money with For10Cloud. Upload your content and earn up to ₹40,000 per video.",
-    "url": "https://for10cloud.com",
-    "offers": {
-      "@type": "Offer",
-      "description": "Earn up to ₹40,000 per video",
-      "priceCurrency": "INR",
-      "price": "0",
-      "availability": "https://schema.org/InStock"
-    },
-    "keywords": "for10, for10cloud, ForTen, video sharing, earn money, content creator",
-    "operatingSystem": "Any",
-    "browserRequirements": "Requires JavaScript"
-  }
-  </script>
-</head>
-<body>
   <script src="main.dart.js" type="application/javascript"></script>
 </body>
 </html>
